@@ -39,7 +39,7 @@ app, another mod) does. The mod never makes either call itself.
 | --- | --- | --- |
 | `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. The prompt text itself is never changed. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override is set. | Sets the request's model to the one you picked. Subagent requests are left alone. |
-| `command.run` (`/model` only) | Each run of `/model`. | Nothing: it clears the override and the status line, then lets the command run as given. |
+| `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's override and its status line. |
 
 ## Install
 
