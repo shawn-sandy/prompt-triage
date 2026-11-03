@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="56 46 400 400" role="img" aria-labelledby="title">
+  <title id="title">prompt-triage</title>
+  <rect x="56" y="46" width="400" height="400" rx="40" fill="#131313"/>
+  <path d="M181 385.9 A150 150 0 0 1 108.28 282.05" fill="none" stroke="#28D05A" stroke-width="34" stroke-linecap="round"/>
+  <path d="M108.28 229.95 A150 150 0 0 1 256 106" fill="none" stroke="#ECECEC" stroke-width="34" stroke-linecap="round"/>
+  <path d="M307.3 115.05 A150 150 0 0 1 331 385.9" fill="none" stroke="#F2385A" stroke-width="34" stroke-linecap="round"/>
+  <path d="M237 228 L271 256 L237 284" fill="none" stroke="#ECECEC" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

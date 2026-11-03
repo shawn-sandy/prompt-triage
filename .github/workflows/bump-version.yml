@@ -1,0 +1,39 @@
+name: bump-version
+
+# Bumps plugin.json and tags the release when the mod's code changes on main: minor when a
+# pushed commit subject starts with `feat:` or `feat(scope):`, patch otherwise.
+# Installed users only get an update when `version` changes, so each merged change must bump it.
+# The bump commit touches only plugin.json, which is outside `paths`, so it does not re-trigger.
+on:
+  push:
+    branches: [main]
+    paths:
+      - hooks/register.ts
+      - hooks/hooks.json
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the subjects of every pushed commit are read below
+      - name: Bump version and tag
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          current=$(jq -r .version .claude-plugin/plugin.json)
+          if git log --format=%s "$BEFORE"..HEAD | grep -qE '^feat(\([^)]*\))?:'; then
+            next=$(echo "$current" | awk -F. -v OFS=. '{ $2++; $3 = 0; print }')
+          else
+            next=$(echo "$current" | awk -F. -v OFS=. '{ $NF++; print }')
+          fi
+          sed -i -E "s/(\"version\": \")[^\"]+/\1$next/" .claude-plugin/plugin.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: bump version to $next"
+          git tag "prompt-triage--v$next"
+          git push --follow-tags
