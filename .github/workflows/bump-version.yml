@@ -1,15 +1,17 @@
 name: bump-version
 
-# Bumps plugin.json and tags the release when the mod's code changes on main: minor when a
-# pushed commit subject starts with `feat:` or `feat(scope):`, patch otherwise.
+# Bumps plugin.json and publishes a tagged GitHub release when the mod's code changes on main:
+# minor when a pushed commit subject starts with `feat:` or `feat(scope):`, patch otherwise.
 # Installed users only get an update when `version` changes, so each merged change must bump it.
 # The bump commit touches only plugin.json, which is outside `paths`, so it does not re-trigger.
+# This file is in `paths` so a change to the release flow is exercised by its own merge.
 on:
   push:
     branches: [main]
     paths:
       - hooks/register.ts
       - hooks/hooks.json
+      - .github/workflows/bump-version.yml
 
 permissions:
   contents: write
@@ -21,9 +23,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the subjects of every pushed commit are read below
-      - name: Bump version and tag
+      - name: Bump version and release
         env:
           BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           current=$(jq -r .version .claude-plugin/plugin.json)
           if git log --format=%s "$BEFORE"..HEAD | grep -qE '^feat(\([^)]*\))?:'; then
@@ -35,5 +38,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "chore: bump version to $next"
-          git tag "prompt-triage--v$next"
-          git push --follow-tags
+          git push
+          # gh creates the tag on the bump commit; a bare `git tag` + `--follow-tags` never pushed it.
+          gh release create "prompt-triage--v$next" --target "$(git rev-parse HEAD)" \
+            --title "prompt-triage v$next" --generate-notes
