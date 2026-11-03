@@ -65,7 +65,7 @@ test('a complex first prompt offers opus, and picking it routes main-loop reques
 
   await submit($, 'Redesign the auth layer across three services')
   expect(seen.asked).toEqual([['Switch to opus', 'Keep current model']])
-  expect(seen.status).toEqual(['model: opus (prompt-triage)'])
+  expect(seen.status).toEqual(['running opus, not claude-sonnet-5-5'])
 
   await step($)
   await step($, 'sub-1')
