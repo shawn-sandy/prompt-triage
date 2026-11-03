@@ -1,0 +1,12 @@
+{
+  "name": "prompt-triage",
+  "owner": { "name": "Shawn Sandy" },
+  "description": "Claude Code mods by Shawn Sandy: prompt-triage rates a session's first prompt and offers a model switch.",
+  "plugins": [
+    {
+      "name": "prompt-triage",
+      "source": "./",
+      "description": "Rates the first prompt of a session and offers to switch models or hand the task to a new session."
+    }
+  ]
+}
