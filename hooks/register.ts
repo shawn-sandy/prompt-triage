@@ -1,8 +1,11 @@
-import type { EngineInterface, PromptSubmitInput, Register } from 'claude-code'
+import type { EngineInterface, ModelEffort, PromptSubmitInput, Register } from 'claude-code'
 
 // Each rating and the model alias it suggests.
 const SUGGEST = { simple: 'haiku', moderate: 'sonnet', complex: 'opus' } as const
 type Rating = keyof typeof SUGGEST
+// The least effort each rating runs at; simple leaves the session's own.
+const FLOOR: Record<Rating, ModelEffort | undefined> = { simple: undefined, moderate: 'medium', complex: 'high' }
+const LEVELS: readonly ModelEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 const ALIASES = ['haiku', 'sonnet', 'opus'] as const
 const KEEP = 'Keep current model'
@@ -48,8 +51,12 @@ async function improve($: EngineInterface, text: string): Promise<string | undef
   return found + (isFilled ? 'The improved prompt is in the prompt box: edit it or press Enter.' : `Improved prompt:\n\n${reviewed.prompt}`)
 }
 
-/** Rates the prompt and asks the person; undefined when there is nothing to ask or they dismissed it. */
-async function choose($: EngineInterface, e: PromptSubmitInput, canImprove: boolean): Promise<string | undefined> {
+/** Rates the prompt and asks the person; answer undefined when there is nothing to ask, all undefined when rating failed or they dismissed it. */
+async function choose(
+  $: EngineInterface,
+  e: PromptSubmitInput,
+  canImprove: boolean,
+): Promise<{ rating: Rating; answer?: string } | undefined> {
   try {
     const rating = (await $.model.classify(e.text, Object.keys(SUGGEST))) as Rating | undefined
     if (!rating) return undefined
@@ -63,13 +70,15 @@ async function choose($: EngineInterface, e: PromptSubmitInput, canImprove: bool
       KEEP,
       ...(canHandOff ? [NEW_SESSION] : []),
     ]
-    if (options.length < 2) return undefined
+    if (options.length < 2) return { rating }
 
+    const floor = FLOOR[rating] ? ` If it runs here, effort will be at least ${FLOOR[rating]}.` : ''
     // Offered only where the dialog shows anyway, so it adds no question; /improve covers the rest.
-    return await $.ui.ask(`This prompt looks ${rating}. Keep running it on ${current}?`, {
+    const answer = await $.ui.ask(`This prompt looks ${rating}. Keep running it on ${current}?${floor}`, {
       header: 'Model',
       options: canImprove ? [...options, IMPROVE] : options,
     })
+    return { rating, answer }
   } catch {
     return undefined // classifier failed or the dialog was dismissed: leave the prompt alone
   }
@@ -78,6 +87,12 @@ async function choose($: EngineInterface, e: PromptSubmitInput, canImprove: bool
 export const register: Register = on => {
   // The model the person picked for the main loop; undefined leaves the session's own.
   let model: string | undefined
+  // The least effort the main loop runs at; undefined leaves the session's own.
+  let effort: ModelEffort | undefined
+  // The status line's parts: the model override, and the effort once a request was raised.
+  let running: string | undefined
+  let raised = false
+  const line = () => [running, raised && effort && `effort raised to ${effort}`].filter(Boolean).join(', ') || undefined
   // Set once the first prompt was improved, so its rewrite is rated again without a second offer.
   let improved = false
 
@@ -94,8 +109,9 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     if (e.command || e.isMeta || e.turnId || (await $.session.turns()) > 0) return next(e)
 
-    const answer = await choose($, e, !improved)
-    if (answer === undefined) return next(e)
+    const rated = await choose($, e, !improved)
+    if (rated === undefined) return next(e)
+    const { rating, answer } = rated
     if (answer === NEW_SESSION) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
     if (answer === IMPROVE && !improved) {
       improved = true
@@ -103,25 +119,47 @@ export const register: Register = on => {
       return shown === undefined ? next(e) : { drop: shown }
     }
 
+    // A prompt rated again (the improved one, say) replaces the minimum, so the status is shown afresh.
+    effort = FLOOR[rating]
+    if (raised) {
+      raised = false
+      $.ui.status(line())
+    }
     // A label or free text typed under "Other", such as "use sonnet".
-    const picked = ALIASES.find(alias => answer.toLowerCase().includes(alias))
+    const picked = ALIASES.find(alias => answer?.toLowerCase().includes(alias))
     if (picked) {
       model = picked
       // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.
-      $.ui.status(`running ${picked}, not ${await $.session.model()}`)
+      running = `running ${picked}, not ${await $.session.model()}`
+      $.ui.status(line())
     }
     return next(e)
   }).catch(($, e, next) => next(e)) // a failure here never holds up the prompt
 
   // ponytail: rewrites each request rather than running /model, which cannot run while the prompt waits on this hook
   on('turn.step', async function* ($, e, next) {
-    return yield* next(model && !e.agentId ? { ...e, model } : e)
+    if (e.agentId) return yield* next(e)
+    // ponytail: only named levels are compared; an integer budget, or a model without effort, is left alone
+    const low = effort !== undefined && typeof e.effort === 'string' && LEVELS.indexOf(e.effort) < LEVELS.indexOf(effort)
+    if (low && !raised) {
+      raised = true
+      $.ui.status(line())
+    }
+    return yield* next({ ...e, ...(model ? { model } : {}), ...(low ? { effort } : {}) })
   })
 
   // The person's own /model wins from then on.
   on('command.run', { command: 'model' }, ($, e, next) => {
-    model = undefined
-    $.ui.status(undefined)
+    model = running = undefined
+    $.ui.status(line())
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // Likewise the person's own /effort, leaving any model override in place.
+  on('command.run', { command: 'effort' }, ($, e, next) => {
+    effort = undefined
+    raised = false
+    $.ui.status(line())
     return next(e)
   }).catch(($, e, next) => next(e))
 }
