@@ -14,7 +14,7 @@ Claude desktop app it can also hand a complex task to a new session.
    a dialog asks whether to switch or keep the current model. Under "Other"
    you can type a model name, such as `use sonnet`.
 3. In the desktop app, a `complex` rating also offers **Open in a new
-   session**. Choosing it adds an instruction to your prompt asking Claude to
+   session**. Choosing it adds context containing an instruction asking Claude to
    start a fresh session with `start_session` instead of doing the task in
    this one. The mod cannot start the session itself, so it depends on Claude
    following that instruction.
@@ -69,10 +69,11 @@ prompts are not checked.
 ## Data
 
 The text of your first prompt is sent once per session to Claude Code's small,
-fast model through `$.model.classify`, to get the rating. The mod stores
-nothing, writes no files, and makes no network requests of its own. The only
-text it adds to a prompt is the new-session instruction described above, and
-only when you choose that option.
+fast model through `$.model.classify`, to get the rating. The mod does not
+persist prompt data or the model override; the override is held in memory for
+the session. It writes no files and makes no network requests of its own. The
+only context it adds is the new-session instruction described above, and only
+when you choose that option.
 
 ## Development
 
