@@ -9,7 +9,15 @@ type Setup = {
   surfaces?: RenderSurface[]
   /** The label the person picks; undefined dismisses the dialog. */
   answer?: string
+  /** The reviewer's reply; undefined fails the review call. */
+  review?: string
+  /** Whether a path the prompt names exists. */
+  exists?: boolean
 }
+
+const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+const REVIEWED =
+  '<issues>\n- No done-criteria\n- Which services?\n</issues>\n<prompt>Redesign auth in api, web and admin; done when tests pass.</prompt>'
 
 /** Answers, beneath the plugin, every engine call the mod makes. */
 function engine(on: On, s: Setup) {
@@ -17,6 +25,7 @@ function engine(on: On, s: Setup) {
   const submitted: PromptSubmitInput[] = []
   const steps: TurnStepInput[] = []
   const status: (string | undefined)[] = []
+  const filled: string[] = []
   let classified = 0
 
   on('session.turns', () => ({ value: s.turns ?? 0 }))
@@ -45,13 +54,29 @@ function engine(on: On, s: Setup) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
   })
   on('command.run', () => ({ text: '' }))
+  on('model.complete', () => ({
+    value:
+      s.review === undefined
+        ? { isAnswered: false, reason: 'empty-reply', usage: USAGE }
+        : { isAnswered: true, text: s.review, usage: USAGE },
+  }))
+  on('fs.exists', () => ({ value: s.exists ?? true }))
+  on('prompt.fill', (_$, e) => {
+    filled.push(e.text)
+    return { isFilled: true }
+  })
 
-  return { asked, submitted, steps, status, classified: () => classified }
+  return { asked, submitted, steps, status, filled, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
 async function submit($: Engine, text: string) {
-  await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+  return await $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } })
+}
+
+/** Runs a slash command as the person typing it. */
+async function command($: Engine, name: string, args = '') {
+  return await $.command.run({ command: name, args, origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
 }
 
 /** Runs one model request of the main loop, or of a subagent's. */
@@ -64,7 +89,7 @@ test('a complex first prompt offers opus, and picking it routes main-loop reques
   const seen = engine(on, { answer: 'Switch to opus' })
 
   await submit($, 'Redesign the auth layer across three services')
-  expect(seen.asked).toEqual([['Switch to opus', 'Keep current model']])
+  expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Improve prompt']])
   expect(seen.status).toEqual(['running opus, not claude-sonnet-5-5'])
 
   await step($)
@@ -139,4 +164,56 @@ test("the person's own /model ends the override", async ($, on) => {
   await step($)
   expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
   expect(seen.status.at(-1)).toBeUndefined()
+})
+
+test('improving the first prompt holds it back and puts the rewrite in the prompt box', async ($, on) => {
+  const seen = engine(on, { answer: 'Improve prompt', review: REVIEWED })
+
+  const result = await submit($, 'Redesign the auth layer')
+  expect(seen.submitted).toEqual([])
+  expect(seen.filled).toEqual(['Redesign auth in api, web and admin; done when tests pass.'])
+  expect(result.drop).toContain('No done-criteria')
+  expect(result.drop).toContain('Which services?')
+})
+
+test('the improved prompt is rated again when sent, without offering another improvement', async ($, on) => {
+  const seen = engine(on, { answer: 'Improve prompt', review: REVIEWED })
+
+  await submit($, 'Redesign the auth layer')
+  await submit($, seen.filled[0]!)
+  expect(seen.asked[1]).toEqual(['Switch to opus', 'Keep current model'])
+  expect(seen.submitted[0]?.text).toBe('Redesign auth in api, web and admin; done when tests pass.')
+})
+
+test('a path the prompt names that does not exist is reported', async ($, on) => {
+  const seen = engine(on, { answer: 'Improve prompt', review: REVIEWED, exists: false })
+
+  const result = await submit($, 'Fix the bug in src/auth/session.ts')
+  expect(result.drop).toContain('src/auth/session.ts')
+  expect(seen.filled.length).toBe(1)
+})
+
+test('a failed review sends the prompt unchanged', async ($, on) => {
+  const seen = engine(on, { answer: 'Improve prompt' })
+
+  const result = await submit($, 'Redesign the auth layer')
+  expect(result.drop).toBeUndefined()
+  expect(seen.filled).toEqual([])
+  expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
+})
+
+test('/improve reviews any prompt and puts the rewrite in the prompt box', async ($, on) => {
+  const seen = engine(on, { turns: 3, review: REVIEWED })
+
+  const result = await command($, 'improve', 'Redesign the auth layer')
+  expect(seen.filled).toEqual(['Redesign auth in api, web and admin; done when tests pass.'])
+  expect(result.text).toContain('Which services?')
+})
+
+test('/improve with no prompt reviews nothing', async ($, on) => {
+  const seen = engine(on, { review: REVIEWED })
+
+  const result = await command($, 'improve')
+  expect(seen.filled).toEqual([])
+  expect(result.text).toBeTruthy()
 })

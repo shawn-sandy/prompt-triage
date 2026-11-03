@@ -1,8 +1,9 @@
 # prompt-triage
 
 A Claude Code mod that looks at the first prompt of each new session, rates
-how complex it is, and offers to switch models before the work starts. In the
-Claude desktop app it can also hand a complex task to a new session.
+how complex it is, and offers to switch models before the work starts. It can
+also review a prompt and put an improved one in the prompt box. In the Claude
+desktop app it can also hand a complex task to a new session.
 
 ## What it does
 
@@ -18,7 +19,9 @@ Claude desktop app it can also hand a complex task to a new session.
    start a fresh session with `start_session` instead of doing the task in
    this one. The mod cannot start the session itself, so it depends on Claude
    following that instruction.
-4. When the suggestion matches your current model, nothing is asked, except
+4. Whenever the dialog is shown, it also offers **Improve prompt** (see
+   below). It does not add a dialog where none would be shown.
+5. When the suggestion matches your current model, nothing is asked, except
    that in the desktop app a `complex` prompt still offers the new session.
    Dismissing the dialog, or a failed rating, sends the prompt unchanged.
 
@@ -27,6 +30,26 @@ session; subagents keep their own models. While it is in effect the status
 line shows `running <name>, not <session model>`. The model picker and
 `/model` still show the session's own setting, which is why the text names
 both. Running `/model` yourself ends the override.
+
+## Improving a prompt
+
+**Improve prompt** in the dialog holds the first prompt back instead of
+sending it. One call to `haiku` reviews it for a missing goal, scope or
+done-criteria, ambiguity and contradictions, and rewrites it to fix them.
+Paths the prompt names, such as `src/auth.ts`, are checked against the working
+directory, and any that are missing are listed. The issues are shown, and the
+rewrite is put in the prompt box for you to edit or send with Enter. Sent, the
+rewrite is rated again, without a second improvement offer. If the review
+fails, the prompt is sent as typed.
+
+For any prompt, at any point in the session, run the review by hand:
+
+```text
+/improve <prompt>
+```
+
+It shows the issues and puts the rewrite in the prompt box. Nothing is sent
+until you press Enter.
 
 ## Install
 
@@ -55,7 +78,8 @@ add the marketplace `shawn-sandy/prompt-triage`.
 ## Cost
 
 One small classification request on the first prompt of each session. Later
-prompts are not checked.
+prompts are not checked. Each **Improve prompt** or `/improve` adds one `haiku`
+request.
 
 ## Limits
 
@@ -65,13 +89,21 @@ prompts are not checked.
   or `opus`, so `keep opus` switches to opus.
 - The override lives in the mod's memory. If the mod reloads, the session goes
   back to its own model.
+- The path check is a heuristic: it checks words that contain a slash or end in
+  a common source extension, so a name such as `node.js` can be reported as
+  missing.
+- Choosing **Improve prompt** skips the model choice for that prompt. The
+  choice is offered again when you send the rewrite.
 
 ## Data
 
 The text of your first prompt is sent once per session to Claude Code's small,
-fast model through `$.model.classify`, to get the rating. The mod does not
-persist prompt data or the model override; the override is held in memory for
-the session. It writes no files and makes no network requests of its own. The
+fast model through `$.model.classify`, to get the rating. When you choose
+**Improve prompt** or run `/improve`, that prompt is also sent to `haiku`
+through `$.model.complete` for the review. The path check reads only whether
+files exist, not their contents. The mod does not persist prompt data or the
+model override; the override is held in memory for the session. It writes no
+files and makes no network requests of its own. The
 only context it adds is the new-session instruction described above, and only
 when you choose that option.
 
