@@ -28,6 +28,19 @@ line shows `running <name>, not <session model>`. The model picker and
 `/model` still show the session's own setting, which is why the text names
 both. Running `/model` yourself ends the override.
 
+## Hooks
+
+The mod registers three hooks in `hooks/register.ts`. `prompt.submit` and
+`command.run` are also the names of calls, so these hooks run whenever a
+prompt is submitted or `/model` is run, whether you do it or other code (the
+app, another mod) does. The mod never makes either call itself.
+
+| Hook | When it acts | What it may change |
+| --- | --- | --- |
+| `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. The prompt text itself is never changed. If the hook fails, the prompt is sent unchanged. |
+| `turn.step` | Each model request while an override is set. | Sets the request's model to the one you picked. Subagent requests are left alone. |
+| `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's override and its status line. |
+
 ## Install
 
 This is a Claude Code mod, so it needs a Claude Code release that supports
