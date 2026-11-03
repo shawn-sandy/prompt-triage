@@ -80,8 +80,15 @@ async function command($: Engine, name: string, args = '') {
 }
 
 /** Runs one model request of the main loop, or of a subagent's. */
-async function step($: Engine, agentId?: string) {
-  const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, ...(agentId ? { agentId } : {}) })
+async function step($: Engine, agentId?: string, effort?: TurnStepInput['effort']) {
+  const stream = $.turn.step({
+    turnId: 't1',
+    index: 0,
+    model: 'claude-sonnet-5-5',
+    messageCount: 1,
+    ...(agentId ? { agentId } : {}),
+    ...(effort !== undefined ? { effort } : {}),
+  })
   for await (const _ of stream);
 }
 
@@ -216,4 +223,76 @@ test('/improve with no prompt reviews nothing', async ($, on) => {
   const result = await command($, 'improve')
   expect(seen.filled).toEqual([])
   expect(result.text).toBeTruthy()
+})
+
+test('a complex prompt raises main-loop effort below high, and leaves the rest alone', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep current model' })
+
+  await submit($, 'Redesign the auth layer')
+  await step($, undefined, 'low')
+  await step($, undefined, 'xhigh')
+  await step($, 'sub-1', 'low')
+  await step($)
+  await step($, undefined, 2048)
+  expect(seen.steps.map(s => s.effort)).toEqual(['high', 'xhigh', 'low', undefined, 2048])
+  expect(seen.status.at(-1)).toBe('effort raised to high')
+})
+
+test('a moderate prompt raises effort to medium even when nothing is asked', async ($, on) => {
+  const seen = engine(on, { rating: 'moderate', model: 'claude-sonnet-5-5' })
+
+  await submit($, 'Rename this function')
+  expect(seen.asked).toEqual([])
+  await step($, undefined, 'low')
+  expect(seen.steps[0]?.effort).toBe('medium')
+})
+
+test('a simple prompt leaves effort alone', async ($, on) => {
+  const seen = engine(on, { rating: 'simple', answer: 'Keep current model' })
+
+  await submit($, 'Fix a typo')
+  await step($, undefined, 'low')
+  expect(seen.steps[0]?.effort).toBe('low')
+})
+
+test('a dismissed dialog leaves effort alone', async ($, on) => {
+  const seen = engine(on, {})
+
+  await submit($, 'Redesign the auth layer')
+  await step($, undefined, 'low')
+  expect(seen.steps[0]?.effort).toBe('low')
+})
+
+test("the person's own /effort ends the effort minimum but keeps the model override", async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await step($, undefined, 'low')
+  await command($, 'effort', 'low')
+  await step($, undefined, 'low')
+  expect(seen.steps.map(s => [s.model, s.effort])).toEqual([['opus', 'high'], ['opus', 'low']])
+  expect(seen.status.at(-1)).toBe('running opus, not claude-sonnet-5-5')
+})
+
+test('a prompt rated again replaces the effort minimum and its status', async ($, on) => {
+  const s: Setup = { answer: 'Keep current model' }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await step($, undefined, 'low')
+  s.rating = 'moderate'
+  await submit($, 'Rename this function')
+  await step($, undefined, 'low')
+  expect(seen.steps.map(x => x.effort)).toEqual(['high', 'medium'])
+  expect(seen.status.at(-1)).toBe('effort raised to medium')
+})
+
+test("/model after a raise keeps the effort part of the status line", async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await step($, undefined, 'low')
+  expect(seen.status.at(-1)).toBe('running opus, not claude-sonnet-5-5, effort raised to high')
+  await command($, 'model', 'sonnet')
+  expect(seen.status.at(-1)).toBe('effort raised to high')
 })
