@@ -52,7 +52,8 @@ export const register: Register = on => {
     const picked = ALIASES.find(alias => answer.toLowerCase().includes(alias))
     if (picked) {
       model = picked
-      $.ui.status(`model: ${picked} (prompt-triage)`)
+      // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.
+      $.ui.status(`running ${picked}, not ${await $.session.model()}`)
     }
     return next(e)
   }).catch(($, e, next) => next(e)) // a failure here never holds up the prompt

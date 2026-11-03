@@ -4,5 +4,6 @@
   "description": "Rates the first prompt of a session and offers to switch models or hand the task to a new session.",
   "author": { "name": "Shawn Sandy" },
   "homepage": "https://github.com/shawn-sandy/prompt-triage",
-  "license": "MIT"
+  "license": "MIT",
+  "icon": "./assets/icon.svg"
 }
