@@ -192,7 +192,7 @@ claude plugin test .           # run hooks/register.test.ts
 | `hooks/hooks.json` | Points Claude Code at the mod: `{ "modules": ["./register.ts"] }`. |
 | `.claude-plugin/plugin.json` | The plugin manifest: name, `version`, description, icon. |
 | `.claude-plugin/marketplace.json` | Makes this repo a marketplace that lists the one plugin. |
-| `assets/` | The icon files. |
+| `assets/` | The icon files. `icon.png` (512x512) is the one `plugin.json` points at; the SVGs are its source. |
 | `tsconfig.json` | Extends `.claude-plugin/types/tsconfig.json`. That folder is in `.gitignore`, so a fresh clone does not contain it. |
 
 ### Releases
