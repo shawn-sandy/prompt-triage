@@ -8,6 +8,9 @@ const FLOOR: Record<Rating, ModelEffort | undefined> = { simple: undefined, mode
 const LEVELS: readonly ModelEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 const ALIASES = ['haiku', 'sonnet', 'opus'] as const
+// Model families, weakest first; -1 for a model named none of them.
+const RANK = ['haiku', 'sonnet', 'opus', 'fable']
+const rank = (model: string) => RANK.findIndex(family => model.toLowerCase().includes(family))
 const KEEP = 'Keep current model'
 const NEW_SESSION = 'Open in a new session'
 const IMPROVE = 'Improve prompt'
@@ -23,8 +26,9 @@ const REVIEWER =
   'then <prompt> with the prompt rewritten to fix the problems using any <answers>, ' +
   "keeping the person's intent, facts and voice, adding nothing they did not ask for, and leaving no placeholders."
 
-// ponytail: path-like tokens only (a slash, or a common source extension); names like "node.js" can false-positive
-const PATH = /^(?:[\w.-]+\/[\w./-]*[\w-]|[\w-]+\.(?:tsx?|jsx?|json|md|py|go|rs|rb|java|css|scss|html|ya?ml|toml|sh|sql|txt))$/
+// ponytail: path-like tokens only (a ./ or ../ start, or a common source extension), so "and/or" is skipped;
+// names like "node.js" can false-positive, and a folder named without ./ is not checked
+const PATH = /^(?:\.{1,2}\/[\w./-]*[\w-]|[\w./-]*[\w-]\.(?:tsx?|jsx?|json|md|py|go|rs|rb|java|css|scss|html|ya?ml|toml|sh|sql|txt))$/
 
 /** A question for the person and the answers they can pick; free text goes under the dialog's "Other". */
 type Question = { question: string; options: string[] }
@@ -115,8 +119,10 @@ async function choose(
     const suggested = SUGGEST[rating]
     // ponytail: start_session exists only in the desktop app, so the hand-off is offered there alone
     const canHandOff = rating === 'complex' && (await $.session.surfaces()).includes('desktop')
+    // Complex wants the strongest model, so one ranked above opus already fits; lower ratings still offer a cheaper one.
+    const fits = rating === 'complex' ? rank(current) >= rank(suggested) : current.toLowerCase().includes(suggested)
     const options = [
-      ...(current.toLowerCase().includes(suggested) ? [] : [`Switch to ${suggested}`]),
+      ...(fits ? [] : [`Switch to ${suggested}`]),
       KEEP,
       ...(canHandOff ? [NEW_SESSION] : []),
     ]
@@ -176,8 +182,9 @@ export const register: Register = on => {
       raised = false
       $.ui.status(line())
     }
-    // A label or free text typed under "Other", such as "use sonnet".
-    const picked = ALIASES.find(alias => answer?.toLowerCase().includes(alias))
+    // A label or free text typed under "Other", such as "use sonnet"; text naming two models ("not haiku, use opus") is ambiguous, so it switches nothing.
+    const named = ALIASES.filter(alias => answer?.toLowerCase().includes(alias))
+    const picked = named.length === 1 ? named[0] : undefined
     if (picked) {
       model = picked
       // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.

@@ -131,6 +131,25 @@ test('free text under "Other" naming a model is taken', async ($, on) => {
   expect(seen.steps[0]?.model).toBe('haiku')
 })
 
+test('free text naming two models switches nothing', async ($, on) => {
+  const seen = engine(on, { answer: 'not haiku, use opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await step($)
+  expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
+  expect(seen.status).toEqual([])
+})
+
+test('a complex prompt on a model above opus is not offered a step down', async ($, on) => {
+  const seen = engine(on, { model: 'claude-fable-5-1', answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.asked).toEqual([])
+  await step($, undefined, 'low')
+  expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
+  expect(seen.steps[0]?.effort).toBe('high')
+})
+
 test('a later prompt in the session is not checked', async ($, on) => {
   const seen = engine(on, { turns: 1, answer: 'Switch to opus' })
 
@@ -211,6 +230,14 @@ test('a path the prompt names that does not exist is reported', async ($, on) =>
   const result = await submit($, 'Fix the bug in src/auth/session.ts')
   expect(result.drop).toContain('src/auth/session.ts')
   expect(seen.filled.length).toBe(1)
+})
+
+test('a word with a slash is not checked as a path unless it looks like one', async ($, on) => {
+  engine(on, { answer: 'Improve prompt', review: REVIEWED, exists: false })
+
+  const result = await submit($, 'Support and/or filters in ./src/filters.ts')
+  expect(result.drop).toContain('./src/filters.ts')
+  expect(result.drop).not.toContain('and/or')
 })
 
 test('a rewrite the prompt box could not take is shown exactly as written', async ($, on) => {

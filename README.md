@@ -135,8 +135,12 @@ request, and a second when you answer its questions.
 
 - The first prompt waits for the rating and, when a question is shown, for your
   answer before it is sent.
-- Free text under "Other" switches the model if it contains `haiku`, `sonnet`
-  or `opus`, so `keep opus` switches to opus.
+- Free text under "Other" switches the model if it names exactly one of
+  `haiku`, `sonnet` or `opus`, so `keep opus` switches to opus. Text naming
+  two, such as `not haiku, use opus`, switches nothing.
+- A `complex` prompt on a model above opus, such as Fable, is not offered a
+  switch to opus. `simple` and `moderate` prompts are still offered the cheaper
+  model.
 - The override and the effort minimum live in the mod's memory. If the mod
   reloads, the session goes back to its own model and effort.
 - Whether a request takes effort is read from the session's model. If you
@@ -145,9 +149,10 @@ request, and a second when you answer its questions.
   none, the minimum is not applied after switching to one that does.
 - The effort minimum is set from the first prompt only. A different task later
   in the session does not change it.
-- The path check is a heuristic: it checks words that contain a slash or end in
-  a common source extension, so a name such as `node.js` can be reported as
-  missing.
+- The path check is a heuristic: it checks words that start with `./` or `../`
+  or end in a common source extension, so a name such as `node.js` can be
+  reported as missing. Words such as `and/or` are skipped, and so is a folder
+  named without `./`, such as `src/components`.
 - Choosing **Improve prompt** skips the model choice for that prompt. The
   choice is offered again when you send the rewrite.
 
