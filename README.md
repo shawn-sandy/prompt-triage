@@ -59,9 +59,21 @@ override stays.
 
 **Improve prompt** in the dialog holds the first prompt back instead of
 sending it. One call to `haiku` reviews it for a missing goal, scope or
-done-criteria, ambiguity and contradictions, and rewrites it to fix them.
-Paths the prompt names, such as `src/auth.ts`, are checked against the working
-directory, and any that are missing are listed. The issues are shown, and the
+done-criteria, ambiguity, contradictions and unfilled placeholders such as
+`[Specify the files]`, and rewrites it to fix them.
+
+When the fix needs a fact only you know, such as which files are in scope, the
+review asks you first: up to three questions, one dialog each, with likely
+answers to pick or your own under "Other". A second `haiku` call then rewrites
+the prompt with your answers, and lists only the issues your answers left
+unfixed. Dismissing a question skips the rest; the answers
+given so far are still used, and with none the first rewrite is kept, as it is
+when the second call fails.
+
+Paths the prompt or the rewrite names, such as `src/auth.ts`, are checked
+against the working directory, and any that are missing are listed, so a path
+the review made up is caught. A glob such as `src/*.ts` is checked by its
+folder. The issues are shown, and the
 rewrite is put in the prompt box for you to edit or send with Enter. Sent, the
 rewrite is rated again, without a second improvement offer. If the review
 fails, the prompt is sent as typed.
@@ -72,8 +84,8 @@ For any prompt, at any point in the session, run the review by hand:
 /improve <prompt>
 ```
 
-It shows the issues and puts the rewrite in the prompt box. Nothing is sent
-until you press Enter.
+It asks the same questions, shows the issues and puts the rewrite in the prompt
+box. Nothing is sent until you press Enter.
 
 ## Hooks
 
@@ -86,9 +98,9 @@ itself.
 | Hook | When it acts | What it may change |
 | --- | --- | --- |
 | `session.start` | Each session start. | Registers the `/improve` command. |
-| `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. When you choose **Improve prompt**, holds the prompt back and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
+| `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. When you choose **Improve prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override or an effort minimum is set. | Sets the request's model to the one you picked, and raises its effort to the minimum when it is lower. Subagent requests are left alone. |
-| `command.run` (`/improve` only) | Each run of `/improve`. | Reviews the prompt given and puts the rewrite in the prompt box. Sends nothing. |
+| `command.run` (`/improve` only) | Each run of `/improve`. | Reviews the prompt given, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
 | `command.run` (`/effort` only) | Each run of `/effort`. | Leaves the command unchanged. Clears the effort minimum and its part of the status line. |
 
@@ -120,14 +132,21 @@ add the marketplace `shawn-sandy/prompt-triage`.
 
 One small classification request on the first prompt of each session. Later
 prompts are not checked. Each **Improve prompt** or `/improve` adds one `haiku`
-request.
+request, and a second when you answer its questions.
 
 ## Limits
 
 - The first prompt waits for the rating and, when a question is shown, for your
   answer before it is sent.
-- Free text under "Other" switches the model if it contains `haiku`, `sonnet`
-  or `opus`, so `keep opus` switches to opus.
+- Free text under "Other" switches the model if it names exactly one of
+  `haiku`, `sonnet` or `opus`, so `keep opus` switches to opus. Text naming
+  two, such as `not haiku, use opus`, switches nothing, and so does text with
+  a no-word (no, not, don't, never, avoid, without), such as
+  `no, don't use haiku`. That also means `no, use opus` switches nothing; use
+  `/model` then.
+- A `complex` prompt on a model above opus, such as Fable, is not offered a
+  switch to opus. `simple` and `moderate` prompts are still offered the cheaper
+  model.
 - The override and the effort minimum live in the mod's memory. If the mod
   reloads, the session goes back to its own model and effort.
 - Whether a request takes effort is read from the session's model. If you
@@ -136,9 +155,10 @@ request.
   none, the minimum is not applied after switching to one that does.
 - The effort minimum is set from the first prompt only. A different task later
   in the session does not change it.
-- The path check is a heuristic: it checks words that contain a slash or end in
-  a common source extension, so a name such as `node.js` can be reported as
-  missing.
+- The path check is a heuristic: it checks words that start with `./` or `../`
+  or end in a common source extension, so a name such as `node.js` can be
+  reported as missing. Words such as `and/or` are skipped, and so is a folder
+  named without `./`, such as `src/components`.
 - Choosing **Improve prompt** skips the model choice for that prompt. The
   choice is offered again when you send the rewrite.
 
@@ -147,7 +167,8 @@ request.
 The text of your first prompt is sent once per session to Claude Code's small,
 fast model through `$.model.classify`, to get the rating. When you choose
 **Improve prompt** or run `/improve`, that prompt is also sent to `haiku`
-through `$.model.complete` for the review. The path check reads only whether
+through `$.model.complete` for the review, and sent again with your answers
+when you answer its questions. The path check reads only whether
 files exist, not their contents. The mod does not persist prompt data, the
 model override or the effort minimum; they are held in memory for the session. It writes no
 files and makes no network requests of its own. The

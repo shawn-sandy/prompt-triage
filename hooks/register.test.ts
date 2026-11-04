@@ -7,12 +7,12 @@ type Setup = {
   rating?: string
   model?: string
   surfaces?: RenderSurface[]
-  /** The label the person picks; undefined dismisses the dialog. */
-  answer?: string
-  /** The reviewer's reply; undefined fails the review call. */
-  review?: string
-  /** Whether a path the prompt names exists. */
-  exists?: boolean
+  /** The label the person picks, or one per dialog in order; undefined dismisses the dialog. */
+  answer?: string | string[]
+  /** The reviewer's reply, or one per review call in order; undefined fails the review call, and THROW rejects it. */
+  review?: string | string[]
+  /** Whether a path the prompt names exists, or the only paths that do. */
+  exists?: boolean | string[]
   /** Whether the prompt box takes the rewrite; undefined takes it. */
   isFilled?: boolean
 }
@@ -21,6 +21,12 @@ const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, c
 const REVIEWED =
   '<issues>\n- No done-criteria\n- Which services?\n</issues>\n<prompt>Redesign auth in api, web and admin; done when tests pass.</prompt>'
 
+/** A review reply that makes the review call reject, as a dropped connection would. */
+const THROW = '<throw>'
+
+/** A setting's value for this call: a list gives out its items in order, then undefined. */
+const take = (v: string | string[] | undefined) => (Array.isArray(v) ? v.shift() : v)
+
 /** Answers, beneath the plugin, every engine call the mod makes. */
 function engine(on: On, s: Setup) {
   const asked: string[][] = []
@@ -28,6 +34,7 @@ function engine(on: On, s: Setup) {
   const steps: TurnStepInput[] = []
   const status: (string | undefined)[] = []
   const filled: string[] = []
+  const reviewed: string[] = []
   let classified = 0
 
   on('session.turns', () => ({ value: s.turns ?? 0 }))
@@ -40,8 +47,9 @@ function engine(on: On, s: Setup) {
   on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => {
     const q = e.questions[0]!
     asked.push(q.options.map(o => o.label))
-    if (s.answer === undefined) return { deny: 'dismissed' }
-    return { result: { questions: e.questions, answers: { [q.question]: s.answer } } }
+    const answer = take(s.answer)
+    if (answer === undefined) return { deny: 'dismissed' }
+    return { result: { questions: e.questions, answers: { [q.question]: answer } } }
   })
   on('ui.status', (_$, e) => {
     status.push(e.text)
@@ -56,19 +64,25 @@ function engine(on: On, s: Setup) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
   })
   on('command.run', () => ({ text: '' }))
-  on('model.complete', () => ({
-    value:
-      s.review === undefined
-        ? { isAnswered: false, reason: 'empty-reply', usage: USAGE }
-        : { isAnswered: true, text: s.review, usage: USAGE },
-  }))
-  on('fs.exists', () => ({ value: s.exists ?? true }))
+  on('model.complete', (_$, e) => {
+    reviewed.push(e.prompt)
+    const text = take(s.review)
+    if (text === THROW) throw new Error('connection dropped')
+    return {
+      value:
+        text === undefined
+          ? { isAnswered: false, reason: 'empty-reply', usage: USAGE }
+          : { isAnswered: true, text, usage: USAGE },
+    }
+  })
+  // The engine resolves each path against the working directory, so a listed path matches by its end.
+  on('fs.exists', (_$, e) => ({ value: Array.isArray(s.exists) ? s.exists.some(p => e.path.endsWith(`/${p}`)) : (s.exists ?? true) }))
   on('prompt.fill', (_$, e) => {
     filled.push(e.text)
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { asked, submitted, steps, status, filled, classified: () => classified }
+  return { asked, submitted, steps, status, filled, reviewed, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -120,6 +134,34 @@ test('free text under "Other" naming a model is taken', async ($, on) => {
   await submit($, 'Redesign the auth layer')
   await step($)
   expect(seen.steps[0]?.model).toBe('haiku')
+})
+
+test('free text naming two models switches nothing', async ($, on) => {
+  const seen = engine(on, { answer: 'not haiku, use opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await step($)
+  expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
+  expect(seen.status).toEqual([])
+})
+
+test('free text that turns a model down switches nothing', async ($, on) => {
+  const seen = engine(on, { answer: "no, don't use haiku" })
+
+  await submit($, 'Redesign the auth layer')
+  await step($)
+  expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
+  expect(seen.status).toEqual([])
+})
+
+test('a complex prompt on a model above opus is not offered a step down', async ($, on) => {
+  const seen = engine(on, { model: 'claude-fable-5-1', answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.asked).toEqual([])
+  await step($, undefined, 'low')
+  expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
+  expect(seen.steps[0]?.effort).toBe('high')
 })
 
 test('a later prompt in the session is not checked', async ($, on) => {
@@ -204,6 +246,33 @@ test('a path the prompt names that does not exist is reported', async ($, on) =>
   expect(seen.filled.length).toBe(1)
 })
 
+test('a word with a slash is not checked as a path unless it looks like one', async ($, on) => {
+  engine(on, { answer: 'Improve prompt', review: REVIEWED, exists: false })
+
+  const result = await submit($, 'Support and/or filters in ./src/filters.ts')
+  expect(result.drop).toContain('./src/filters.ts')
+  expect(result.drop).not.toContain('and/or')
+})
+
+test('a path the rewrite names that does not exist is reported, and a glob is checked by its folder', async ($, on) => {
+  const review = '<issues>\n</issues>\n<prompt>Lint every *.md file in scripts/triage/*.py and tools/gen/*.py.</prompt>'
+  engine(on, { answer: 'Improve prompt', review, exists: ['scripts/triage'] })
+
+  const result = await submit($, 'Lint every *.md file')
+  expect(result.drop).toContain('tools/gen/*.py')
+  expect(result.drop).not.toContain('scripts/triage/*.py was not found')
+  expect(result.drop).not.toContain('*.md was not found')
+})
+
+test('a path only the rewrite names is checked even when the prompt names ten', async ($, on) => {
+  const named = Array.from({ length: 10 }, (_, i) => `a${i}.ts`)
+  const review = `<issues>\n</issues>\n<prompt>Lint ${named.join(' ')} and ghost.ts.</prompt>`
+  engine(on, { answer: 'Improve prompt', review, exists: named })
+
+  const result = await submit($, `Lint ${named.join(' ')}`)
+  expect(result.drop).toContain('ghost.ts')
+})
+
 test('a rewrite the prompt box could not take is shown exactly as written', async ($, on) => {
   const rewrite = 'Redesign auth:\n- api\n- web\n\n```\n  keep   this\n```'
   engine(on, { answer: 'Improve prompt', review: `<issues>\n- No done-criteria\n</issues>\n<prompt>${rewrite}</prompt>`, isFilled: false })
@@ -235,6 +304,64 @@ test('/improve with no prompt reviews nothing', async ($, on) => {
   const result = await command($, 'improve')
   expect(seen.filled).toEqual([])
   expect(result.text).toBeTruthy()
+})
+
+const QUESTION = '<question>\nWhich files should the review cover?\n- Hook code\n- Whole repo\n</question>\n'
+const ASKS = `<issues>\n- Placeholders left unfilled\n</issues>\n${QUESTION}<prompt>Review the workflow.</prompt>`
+const ANSWERED = '<issues>\n</issues>\n<prompt>Review hooks/register.ts.</prompt>'
+
+test('improving asks the questions only the person can answer, then rewrites with the answers', async ($, on) => {
+  const seen = engine(on, { answer: ['Improve prompt', 'Hook code'], review: [ASKS, ANSWERED] })
+
+  const result = await submit($, 'Review the workflow. [Specify the files.]')
+  expect(seen.asked[1]).toEqual(['Hook code', 'Whole repo'])
+  expect(seen.reviewed[1]).toContain('Which files should the review cover? Hook code')
+  expect(seen.filled).toEqual(['Review hooks/register.ts.'])
+  expect(result.drop).not.toContain('Placeholders left unfilled')
+})
+
+test('dismissing a question stops the questions and keeps the first rewrite', async ($, on) => {
+  const two = ASKS.replace('<prompt>', '<question>\nDone when?\n- Tests pass\n- Reviewed\n</question>\n<prompt>')
+  const seen = engine(on, { answer: ['Improve prompt'], review: [two, ANSWERED] })
+
+  await submit($, 'Review the workflow.')
+  expect(seen.asked.length).toBe(2)
+  expect(seen.reviewed.length).toBe(1)
+  expect(seen.filled).toEqual(['Review the workflow.'])
+})
+
+test('a question with fewer than two answers to pick from is not asked', async ($, on) => {
+  const seen = engine(on, { turns: 3, review: '<issues>\n</issues>\n<question>\nWhich files?\n- All\n</question>\n<prompt>Review it.</prompt>' })
+
+  await command($, 'improve', 'Review the workflow.')
+  expect(seen.asked).toEqual([])
+  expect(seen.filled).toEqual(['Review it.'])
+})
+
+test('only "- " lines count as answers to pick from', async ($, on) => {
+  const review = '<issues>\n</issues>\n<question>\nWhich files?\n- All\n-\nIt depends on the scope.\n</question>\n<prompt>Review it.</prompt>'
+  const seen = engine(on, { turns: 3, review })
+
+  await command($, 'improve', 'Review the workflow.')
+  expect(seen.asked).toEqual([])
+})
+
+test('a second review that throws keeps the first rewrite', async ($, on) => {
+  const seen = engine(on, { answer: ['Improve prompt', 'Hook code'], review: [ASKS, THROW] })
+
+  const result = await submit($, 'Review the workflow.')
+  expect(seen.filled).toEqual(['Review the workflow.'])
+  expect(seen.submitted).toEqual([])
+  expect(result.drop).toBeTruthy()
+})
+
+test('/improve asks at most three questions', async ($, on) => {
+  const many = `<issues>\n</issues>\n${QUESTION.repeat(4)}<prompt>Review the workflow.</prompt>`
+  const seen = engine(on, { turns: 3, answer: ['Hook code', 'Hook code', 'Hook code', 'Hook code'], review: [many, ANSWERED] })
+
+  await command($, 'improve', 'Review the workflow.')
+  expect(seen.asked.length).toBe(3)
+  expect(seen.filled).toEqual(['Review hooks/register.ts.'])
 })
 
 test('a complex prompt raises main-loop effort below high, and leaves the rest alone', async ($, on) => {
