@@ -9,7 +9,7 @@ type Setup = {
   surfaces?: RenderSurface[]
   /** The label the person picks, or one per dialog in order; undefined dismisses the dialog. */
   answer?: string | string[]
-  /** The reviewer's reply, or one per review call in order; undefined fails the review call. */
+  /** The reviewer's reply, or one per review call in order; undefined fails the review call, and THROW rejects it. */
   review?: string | string[]
   /** Whether a path the prompt names exists, or the only paths that do. */
   exists?: boolean | string[]
@@ -20,6 +20,9 @@ type Setup = {
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const REVIEWED =
   '<issues>\n- No done-criteria\n- Which services?\n</issues>\n<prompt>Redesign auth in api, web and admin; done when tests pass.</prompt>'
+
+/** A review reply that makes the review call reject, as a dropped connection would. */
+const THROW = '<throw>'
 
 /** A setting's value for this call: a list gives out its items in order, then undefined. */
 const take = (v: string | string[] | undefined) => (Array.isArray(v) ? v.shift() : v)
@@ -64,6 +67,7 @@ function engine(on: On, s: Setup) {
   on('model.complete', (_$, e) => {
     reviewed.push(e.prompt)
     const text = take(s.review)
+    if (text === THROW) throw new Error('connection dropped')
     return {
       value:
         text === undefined
@@ -134,6 +138,15 @@ test('free text under "Other" naming a model is taken', async ($, on) => {
 
 test('free text naming two models switches nothing', async ($, on) => {
   const seen = engine(on, { answer: 'not haiku, use opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await step($)
+  expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
+  expect(seen.status).toEqual([])
+})
+
+test('free text that turns a model down switches nothing', async ($, on) => {
+  const seen = engine(on, { answer: "no, don't use haiku" })
 
   await submit($, 'Redesign the auth layer')
   await step($)
@@ -251,6 +264,15 @@ test('a path the rewrite names that does not exist is reported, and a glob is ch
   expect(result.drop).not.toContain('*.md was not found')
 })
 
+test('a path only the rewrite names is checked even when the prompt names ten', async ($, on) => {
+  const named = Array.from({ length: 10 }, (_, i) => `a${i}.ts`)
+  const review = `<issues>\n</issues>\n<prompt>Lint ${named.join(' ')} and ghost.ts.</prompt>`
+  engine(on, { answer: 'Improve prompt', review, exists: named })
+
+  const result = await submit($, `Lint ${named.join(' ')}`)
+  expect(result.drop).toContain('ghost.ts')
+})
+
 test('a rewrite the prompt box could not take is shown exactly as written', async ($, on) => {
   const rewrite = 'Redesign auth:\n- api\n- web\n\n```\n  keep   this\n```'
   engine(on, { answer: 'Improve prompt', review: `<issues>\n- No done-criteria\n</issues>\n<prompt>${rewrite}</prompt>`, isFilled: false })
@@ -314,6 +336,23 @@ test('a question with fewer than two answers to pick from is not asked', async (
   await command($, 'improve', 'Review the workflow.')
   expect(seen.asked).toEqual([])
   expect(seen.filled).toEqual(['Review it.'])
+})
+
+test('only "- " lines count as answers to pick from', async ($, on) => {
+  const review = '<issues>\n</issues>\n<question>\nWhich files?\n- All\n-\nIt depends on the scope.\n</question>\n<prompt>Review it.</prompt>'
+  const seen = engine(on, { turns: 3, review })
+
+  await command($, 'improve', 'Review the workflow.')
+  expect(seen.asked).toEqual([])
+})
+
+test('a second review that throws keeps the first rewrite', async ($, on) => {
+  const seen = engine(on, { answer: ['Improve prompt', 'Hook code'], review: [ASKS, THROW] })
+
+  const result = await submit($, 'Review the workflow.')
+  expect(seen.filled).toEqual(['Review the workflow.'])
+  expect(seen.submitted).toEqual([])
+  expect(result.drop).toBeTruthy()
 })
 
 test('/improve asks at most three questions', async ($, on) => {

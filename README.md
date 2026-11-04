@@ -140,7 +140,10 @@ request, and a second when you answer its questions.
   answer before it is sent.
 - Free text under "Other" switches the model if it names exactly one of
   `haiku`, `sonnet` or `opus`, so `keep opus` switches to opus. Text naming
-  two, such as `not haiku, use opus`, switches nothing.
+  two, such as `not haiku, use opus`, switches nothing, and so does text with
+  a no-word (no, not, don't, never, avoid, without), such as
+  `no, don't use haiku`. That also means `no, use opus` switches nothing; use
+  `/model` then.
 - A `complex` prompt on a model above opus, such as Fable, is not offered a
   switch to opus. `simple` and `moderate` prompts are still offered the cheaper
   model.

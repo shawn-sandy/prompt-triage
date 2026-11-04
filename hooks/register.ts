@@ -45,9 +45,17 @@ async function review(
   const rewrite = r.isAnswered ? r.text.match(/<prompt>([\s\S]*?)<\/prompt>/)?.[1]?.trim() : undefined
   if (!r.isAnswered || !rewrite) return undefined
 
-  // The rewrite is checked too, since the reviewer can invent a path the person never named.
-  const tokens = `${text} ${rewrite}`.split(/\s+/).map(t => t.replace(/^[`'"(<\[]+|[`'")>\],.:;!?]+$/g, ''))
-  const paths = [...new Set(tokens.filter(t => PATH.test(t.replaceAll('*', 'x')) && !t.includes('//')))].slice(0, 10)
+  const pathsIn = (s: string) => [
+    ...new Set(
+      s
+        .split(/\s+/)
+        .map(t => t.replace(/^[`'"(<\[]+|[`'")>\],.:;!?]+$/g, ''))
+        .filter(t => PATH.test(t.replaceAll('*', 'x')) && !t.includes('//')),
+    ),
+  ]
+  const named = pathsIn(text).slice(0, 10)
+  // The rewrite's own paths get their own limit, since the reviewer can invent one the person never named.
+  const paths = [...named, ...pathsIn(rewrite).filter(p => !named.includes(p)).slice(0, 10)]
   // A glob such as src/*.ts is checked by its folder; one with no folder, such as *.md, is not checked.
   const where = (p: string) => (p.includes('*') ? p.slice(0, p.indexOf('*')).replace(/\/[^/]*$/, '') : p)
   const missing = (await Promise.all(paths.map(async p => (where(p) && !(await $.fs.exists(where(p))) ? [p] : [])))).flat()
@@ -62,7 +70,8 @@ async function review(
   const questions = [...head.matchAll(/<question>([\s\S]*?)<\/question>/g)]
     .flatMap(m => {
       const [question, ...lines] = (m[1] ?? '').split('\n').map(l => l.trim()).filter(Boolean)
-      const options = [...new Set(lines.map(l => l.replace(/^-\s*/, '')))].slice(0, 4)
+      // Only "- " lines are answers; a note under the question, or a bare "-", is not one to pick.
+      const options = [...new Set(lines.filter(l => l.startsWith('-')).map(l => l.replace(/^-\s*/, '')).filter(Boolean))].slice(0, 4)
       // The dialog takes 2 to 4 options.
       return question && options.length >= 2 ? [{ question, options }] : []
     })
@@ -86,8 +95,8 @@ async function improve($: EngineInterface, text: string): Promise<{ issues: stri
   const first = await review($, text)
   if (!first) return undefined
   const answers = await interview($, first.questions)
-  // A failed second review keeps the first rewrite rather than losing it.
-  const reviewed = (answers.length ? await review($, text, answers) : undefined) ?? first
+  // A second review that fails or throws keeps the first rewrite rather than losing it and the answers.
+  const reviewed = (answers.length ? await review($, text, answers).catch(() => undefined) : undefined) ?? first
   const { isFilled } = await $.prompt.fill({ text: reviewed.prompt })
   const note = isFilled ? 'The improved prompt is in the prompt box: edit it or press Enter.' : `Improved prompt:\n\n${reviewed.prompt}`
   return { issues: reviewed.issues, note }
@@ -187,8 +196,11 @@ export const register: Register = on => {
       $.ui.status(line())
     }
     // A label or free text typed under "Other", such as "use sonnet"; text naming two models ("not haiku, use opus") is ambiguous, so it switches nothing.
-    const named = ALIASES.filter(alias => answer?.toLowerCase().includes(alias))
-    const picked = named.length === 1 ? named[0] : undefined
+    const said = answer?.toLowerCase() ?? ''
+    const named = ALIASES.filter(alias => said.includes(alias))
+    // ponytail: any no-word switches nothing, so "no, use opus" is missed too; /model covers that, and a wrong switch is worse
+    const turnedDown = /\b(?:no|not|don't|dont|never|avoid|without)\b/.test(said)
+    const picked = named.length === 1 && !turnedDown ? named[0] : undefined
     if (picked) {
       model = picked
       // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.
