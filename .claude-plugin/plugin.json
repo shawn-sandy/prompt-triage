@@ -5,5 +5,5 @@
   "author": { "name": "Shawn Sandy" },
   "homepage": "https://github.com/shawn-sandy/prompt-triage",
   "license": "MIT",
-  "icon": "./assets/icon.png"
+  "icon": "./icon.png"
 }
