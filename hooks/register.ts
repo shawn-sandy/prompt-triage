@@ -57,11 +57,14 @@ function asMarkdown({ issues, note }: { issues: string[]; note: string }): strin
   return `${found}\n\n${note}`
 }
 
-/** A review as one plain sentence: the app draws a drop reason on a single row, raw, where a newline shows as a stray glyph. */
+/**
+ * A review as one plain sentence: the app draws a drop reason on a single row, raw, where a newline shows as a stray glyph.
+ * The note is left as written, since a rewrite the prompt box could not take is the person's only copy of it.
+ */
 function asLine({ issues, note }: { issues: string[]; note: string }): string {
-  const list = issues.map(i => i.replace(/[.;]+$/, '')).join('; ')
+  const list = issues.map(i => i.replace(/\s+/g, ' ').replace(/[.;]+$/, '')).join('; ')
   const found = issues.length ? `Issues: ${list}${/[?!]$/.test(list) ? '' : '.'}` : 'No issues found.'
-  return `Held for review. ${found} ${note}`.replace(/\s+/g, ' ')
+  return `Held for review. ${found} ${note}`
 }
 
 /** Rates the prompt and asks the person; answer undefined when there is nothing to ask, all undefined when rating failed or they dismissed it. */

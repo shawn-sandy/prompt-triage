@@ -13,6 +13,8 @@ type Setup = {
   review?: string
   /** Whether a path the prompt names exists. */
   exists?: boolean
+  /** Whether the prompt box takes the rewrite; undefined takes it. */
+  isFilled?: boolean
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -63,7 +65,7 @@ function engine(on: On, s: Setup) {
   on('fs.exists', () => ({ value: s.exists ?? true }))
   on('prompt.fill', (_$, e) => {
     filled.push(e.text)
-    return { isFilled: true }
+    return { isFilled: s.isFilled ?? true }
   })
 
   return { asked, submitted, steps, status, filled, classified: () => classified }
@@ -200,6 +202,14 @@ test('a path the prompt names that does not exist is reported', async ($, on) =>
   const result = await submit($, 'Fix the bug in src/auth/session.ts')
   expect(result.drop).toContain('src/auth/session.ts')
   expect(seen.filled.length).toBe(1)
+})
+
+test('a rewrite the prompt box could not take is shown exactly as written', async ($, on) => {
+  const rewrite = 'Redesign auth:\n- api\n- web\n\n```\n  keep   this\n```'
+  engine(on, { answer: 'Improve prompt', review: `<issues>\n- No done-criteria\n</issues>\n<prompt>${rewrite}</prompt>`, isFilled: false })
+
+  const result = await submit($, 'Redesign the auth layer')
+  expect(result.drop).toContain(rewrite)
 })
 
 test('a failed review sends the prompt unchanged', async ($, on) => {
