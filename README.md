@@ -65,12 +65,15 @@ done-criteria, ambiguity, contradictions and unfilled placeholders such as
 When the fix needs a fact only you know, such as which files are in scope, the
 review asks you first: up to three questions, one dialog each, with likely
 answers to pick or your own under "Other". A second `haiku` call then rewrites
-the prompt with your answers. Dismissing a question skips the rest; the answers
+the prompt with your answers, and lists only the issues your answers left
+unfixed. Dismissing a question skips the rest; the answers
 given so far are still used, and with none the first rewrite is kept, as it is
 when the second call fails.
 
-Paths the prompt names, such as `src/auth.ts`, are checked against the working
-directory, and any that are missing are listed. The issues are shown, and the
+Paths the prompt or the rewrite names, such as `src/auth.ts`, are checked
+against the working directory, and any that are missing are listed, so a path
+the review made up is caught. A glob such as `src/*.ts` is checked by its
+folder. The issues are shown, and the
 rewrite is put in the prompt box for you to edit or send with Enter. Sent, the
 rewrite is rated again, without a second improvement offer. If the review
 fails, the prompt is sent as typed.

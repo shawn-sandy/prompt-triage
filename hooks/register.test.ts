@@ -11,8 +11,8 @@ type Setup = {
   answer?: string | string[]
   /** The reviewer's reply, or one per review call in order; undefined fails the review call. */
   review?: string | string[]
-  /** Whether a path the prompt names exists. */
-  exists?: boolean
+  /** Whether a path the prompt names exists, or the only paths that do. */
+  exists?: boolean | string[]
   /** Whether the prompt box takes the rewrite; undefined takes it. */
   isFilled?: boolean
 }
@@ -71,7 +71,8 @@ function engine(on: On, s: Setup) {
           : { isAnswered: true, text, usage: USAGE },
     }
   })
-  on('fs.exists', () => ({ value: s.exists ?? true }))
+  // The engine resolves each path against the working directory, so a listed path matches by its end.
+  on('fs.exists', (_$, e) => ({ value: Array.isArray(s.exists) ? s.exists.some(p => e.path.endsWith(`/${p}`)) : (s.exists ?? true) }))
   on('prompt.fill', (_$, e) => {
     filled.push(e.text)
     return { isFilled: s.isFilled ?? true }
@@ -238,6 +239,16 @@ test('a word with a slash is not checked as a path unless it looks like one', as
   const result = await submit($, 'Support and/or filters in ./src/filters.ts')
   expect(result.drop).toContain('./src/filters.ts')
   expect(result.drop).not.toContain('and/or')
+})
+
+test('a path the rewrite names that does not exist is reported, and a glob is checked by its folder', async ($, on) => {
+  const review = '<issues>\n</issues>\n<prompt>Lint every *.md file in scripts/triage/*.py and tools/gen/*.py.</prompt>'
+  engine(on, { answer: 'Improve prompt', review, exists: ['scripts/triage'] })
+
+  const result = await submit($, 'Lint every *.md file')
+  expect(result.drop).toContain('tools/gen/*.py')
+  expect(result.drop).not.toContain('scripts/triage/*.py was not found')
+  expect(result.drop).not.toContain('*.md was not found')
 })
 
 test('a rewrite the prompt box could not take is shown exactly as written', async ($, on) => {
