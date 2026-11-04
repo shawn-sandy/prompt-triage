@@ -122,7 +122,7 @@ claude plugin install prompt-triage --marketplace shawn-sandy/prompt-triage
 ```
 
 A marketplace that is not added yet is added first, in user settings. The
-default install scope is `user`; pass `--scope project` or `--scope local` to
+default install scope is `user`; add `--scope project` or `--scope local` to
 change it.
 
 In the desktop app, where `/plugin` does not run, open Customize > Plugins and
