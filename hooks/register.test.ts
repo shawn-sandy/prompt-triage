@@ -181,6 +181,8 @@ test('improving the first prompt holds it back and puts the rewrite in the promp
   expect(seen.filled).toEqual(['Redesign auth in api, web and admin; done when tests pass.'])
   expect(result.drop).toContain('No done-criteria')
   expect(result.drop).toContain('Which services?')
+  // The app draws a drop reason on one row, where a newline shows as a stray glyph.
+  expect(result.drop).not.toMatch(/\n/)
 })
 
 test('the improved prompt is rated again when sent, without offering another improvement', async ($, on) => {
@@ -214,7 +216,7 @@ test('/improve reviews any prompt and puts the rewrite in the prompt box', async
 
   const result = await command($, 'improve', 'Redesign the auth layer')
   expect(seen.filled).toEqual(['Redesign auth in api, web and admin; done when tests pass.'])
-  expect(result.text).toContain('Which services?')
+  expect(result.text).toContain('\n- Which services?')
 })
 
 test('/improve with no prompt reviews nothing', async ($, on) => {
