@@ -162,6 +162,32 @@ claude plugin validate .       # check the manifest and hooks module
 claude plugin test .           # run hooks/register.test.ts
 ```
 
+### Layout
+
+| Path | What it is |
+| --- | --- |
+| `hooks/register.ts` | All of the mod's logic: the six hooks and the `/improve` command. |
+| `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
+| `hooks/hooks.json` | Points Claude Code at the mod: `{ "modules": ["./register.ts"] }`. |
+| `.claude-plugin/plugin.json` | The plugin manifest: name, `version`, description, icon. |
+| `.claude-plugin/marketplace.json` | Makes this repo a marketplace that lists the one plugin. |
+| `assets/` | The icon files. |
+| `tsconfig.json` | Extends `.claude-plugin/types/tsconfig.json`. That folder is in `.gitignore`, so a fresh clone does not contain it. |
+
+### Releases
+
+Installed users only get an update when `version` in
+`.claude-plugin/plugin.json` changes. You do not edit it by hand: the
+`bump-version` workflow does it when a push to `main` changes
+`hooks/register.ts`, `hooks/hooks.json` or the workflow file itself. It raises
+the minor number if a pushed commit subject starts with `feat:` or
+`feat(scope):`, and the patch number otherwise. It commits the new version and
+publishes a GitHub release tagged `prompt-triage--v<version>`.
+
+Two other workflows run on GitHub: `claude.yml` responds when `@claude` is
+mentioned in an issue or pull request, and `claude-code-review.yml` reviews
+pull requests.
+
 ## License
 
 MIT
