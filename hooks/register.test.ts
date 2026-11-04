@@ -13,6 +13,8 @@ type Setup = {
   review?: string
   /** Whether a path the prompt names exists. */
   exists?: boolean
+  /** Whether the prompt box takes the rewrite; undefined takes it. */
+  isFilled?: boolean
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -63,7 +65,7 @@ function engine(on: On, s: Setup) {
   on('fs.exists', () => ({ value: s.exists ?? true }))
   on('prompt.fill', (_$, e) => {
     filled.push(e.text)
-    return { isFilled: true }
+    return { isFilled: s.isFilled ?? true }
   })
 
   return { asked, submitted, steps, status, filled, classified: () => classified }
@@ -181,6 +183,8 @@ test('improving the first prompt holds it back and puts the rewrite in the promp
   expect(seen.filled).toEqual(['Redesign auth in api, web and admin; done when tests pass.'])
   expect(result.drop).toContain('No done-criteria')
   expect(result.drop).toContain('Which services?')
+  // The app draws a drop reason on one row, where a newline shows as a stray glyph.
+  expect(result.drop).not.toMatch(/\n/)
 })
 
 test('the improved prompt is rated again when sent, without offering another improvement', async ($, on) => {
@@ -200,6 +204,14 @@ test('a path the prompt names that does not exist is reported', async ($, on) =>
   expect(seen.filled.length).toBe(1)
 })
 
+test('a rewrite the prompt box could not take is shown exactly as written', async ($, on) => {
+  const rewrite = 'Redesign auth:\n- api\n- web\n\n```\n  keep   this\n```'
+  engine(on, { answer: 'Improve prompt', review: `<issues>\n- No done-criteria\n</issues>\n<prompt>${rewrite}</prompt>`, isFilled: false })
+
+  const result = await submit($, 'Redesign the auth layer')
+  expect(result.drop).toContain(rewrite)
+})
+
 test('a failed review sends the prompt unchanged', async ($, on) => {
   const seen = engine(on, { answer: 'Improve prompt' })
 
@@ -214,7 +226,7 @@ test('/improve reviews any prompt and puts the rewrite in the prompt box', async
 
   const result = await command($, 'improve', 'Redesign the auth layer')
   expect(seen.filled).toEqual(['Redesign auth in api, web and admin; done when tests pass.'])
-  expect(result.text).toContain('Which services?')
+  expect(result.text).toContain('\n- Which services?')
 })
 
 test('/improve with no prompt reviews nothing', async ($, on) => {

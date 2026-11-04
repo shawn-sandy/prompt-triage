@@ -42,13 +42,29 @@ async function review($: EngineInterface, text: string): Promise<{ issues: strin
   return { issues, prompt: rewrite }
 }
 
-/** Reviews `text` into the prompt box; the line to show, or undefined when the review failed. */
-async function improve($: EngineInterface, text: string): Promise<string | undefined> {
+/** Reviews `text` into the prompt box; its issues and the note on where the rewrite went, or undefined when the review failed. */
+async function improve($: EngineInterface, text: string): Promise<{ issues: string[]; note: string } | undefined> {
   const reviewed = await review($, text)
   if (!reviewed) return undefined
   const { isFilled } = await $.prompt.fill({ text: reviewed.prompt })
-  const found = reviewed.issues.length ? `Issues:\n${reviewed.issues.map(i => `- ${i}`).join('\n')}\n\n` : 'No issues found.\n\n'
-  return found + (isFilled ? 'The improved prompt is in the prompt box: edit it or press Enter.' : `Improved prompt:\n\n${reviewed.prompt}`)
+  const note = isFilled ? 'The improved prompt is in the prompt box: edit it or press Enter.' : `Improved prompt:\n\n${reviewed.prompt}`
+  return { issues: reviewed.issues, note }
+}
+
+/** A review as markdown, for a command's output row, which draws it. */
+function asMarkdown({ issues, note }: { issues: string[]; note: string }): string {
+  const found = issues.length ? `Issues:\n${issues.map(i => `- ${i}`).join('\n')}` : 'No issues found.'
+  return `${found}\n\n${note}`
+}
+
+/**
+ * A review as one plain sentence: the app draws a drop reason on a single row, raw, where a newline shows as a stray glyph.
+ * The note is left as written, since a rewrite the prompt box could not take is the person's only copy of it.
+ */
+function asLine({ issues, note }: { issues: string[]; note: string }): string {
+  const list = issues.map(i => i.replace(/\s+/g, ' ').replace(/[.;]+$/, '')).join('; ')
+  const found = issues.length ? `Issues: ${list}${/[?!]$/.test(list) ? '' : '.'}` : 'No issues found.'
+  return `Held for review. ${found} ${note}`
 }
 
 /** Rates the prompt and asks the person; answer undefined when there is nothing to ask, all undefined when rating failed or they dismissed it. */
@@ -103,7 +119,8 @@ export const register: Register = on => {
 
   on('command.run', { command: 'improve' }, async ($, e) => {
     if (!e.args.trim()) return { text: 'Usage: /improve <prompt>' }
-    return { text: (await improve($, e.args)) ?? 'The review failed; nothing was changed.' }
+    const reviewed = await improve($, e.args)
+    return { text: reviewed ? asMarkdown(reviewed) : 'The review failed; nothing was changed.' }
   }).catch(() => ({ text: 'The review failed; nothing was changed.' }))
 
   on('prompt.submit', async ($, e, next) => {
@@ -115,8 +132,8 @@ export const register: Register = on => {
     if (answer === NEW_SESSION) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
     if (answer === IMPROVE && !improved) {
       improved = true
-      const shown = await improve($, e.text)
-      return shown === undefined ? next(e) : { drop: shown }
+      const reviewed = await improve($, e.text)
+      return reviewed === undefined ? next(e) : { drop: asLine(reviewed) }
     }
 
     // A prompt rated again (the improved one, say) replaces the minimum, so the status is shown afresh.
