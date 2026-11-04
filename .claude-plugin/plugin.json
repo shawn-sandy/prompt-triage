@@ -1,6 +1,6 @@
 {
   "name": "prompt-triage",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Rates the first prompt of a session and offers to switch models, improve the prompt, or hand the task to a new session.",
   "author": { "name": "Shawn Sandy" },
   "homepage": "https://github.com/shawn-sandy/prompt-triage",
