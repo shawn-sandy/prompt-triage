@@ -59,7 +59,16 @@ override stays.
 
 **Improve prompt** in the dialog holds the first prompt back instead of
 sending it. One call to `haiku` reviews it for a missing goal, scope or
-done-criteria, ambiguity and contradictions, and rewrites it to fix them.
+done-criteria, ambiguity, contradictions and unfilled placeholders such as
+`[Specify the files]`, and rewrites it to fix them.
+
+When the fix needs a fact only you know, such as which files are in scope, the
+review asks you first: up to three questions, one dialog each, with likely
+answers to pick or your own under "Other". A second `haiku` call then rewrites
+the prompt with your answers. Dismissing a question skips the rest; the answers
+given so far are still used, and with none the first rewrite is kept, as it is
+when the second call fails.
+
 Paths the prompt names, such as `src/auth.ts`, are checked against the working
 directory, and any that are missing are listed. The issues are shown, and the
 rewrite is put in the prompt box for you to edit or send with Enter. Sent, the
@@ -72,8 +81,8 @@ For any prompt, at any point in the session, run the review by hand:
 /improve <prompt>
 ```
 
-It shows the issues and puts the rewrite in the prompt box. Nothing is sent
-until you press Enter.
+It asks the same questions, shows the issues and puts the rewrite in the prompt
+box. Nothing is sent until you press Enter.
 
 ## Hooks
 
@@ -86,9 +95,9 @@ itself.
 | Hook | When it acts | What it may change |
 | --- | --- | --- |
 | `session.start` | Each session start. | Registers the `/improve` command. |
-| `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. When you choose **Improve prompt**, holds the prompt back and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
+| `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. When you choose **Improve prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override or an effort minimum is set. | Sets the request's model to the one you picked, and raises its effort to the minimum when it is lower. Subagent requests are left alone. |
-| `command.run` (`/improve` only) | Each run of `/improve`. | Reviews the prompt given and puts the rewrite in the prompt box. Sends nothing. |
+| `command.run` (`/improve` only) | Each run of `/improve`. | Reviews the prompt given, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
 | `command.run` (`/effort` only) | Each run of `/effort`. | Leaves the command unchanged. Clears the effort minimum and its part of the status line. |
 
@@ -120,7 +129,7 @@ add the marketplace `shawn-sandy/prompt-triage`.
 
 One small classification request on the first prompt of each session. Later
 prompts are not checked. Each **Improve prompt** or `/improve` adds one `haiku`
-request.
+request, and a second when you answer its questions.
 
 ## Limits
 
@@ -147,7 +156,8 @@ request.
 The text of your first prompt is sent once per session to Claude Code's small,
 fast model through `$.model.classify`, to get the rating. When you choose
 **Improve prompt** or run `/improve`, that prompt is also sent to `haiku`
-through `$.model.complete` for the review. The path check reads only whether
+through `$.model.complete` for the review, and sent again with your answers
+when you answer its questions. The path check reads only whether
 files exist, not their contents. The mod does not persist prompt data, the
 model override or the effort minimum; they are held in memory for the session. It writes no
 files and makes no network requests of its own. The
