@@ -13,7 +13,7 @@ const RANK = ['haiku', 'sonnet', 'opus', 'fable']
 const rank = (model: string) => RANK.findIndex(family => model.toLowerCase().includes(family))
 const KEEP = 'Keep current model'
 const NEW_SESSION = 'Open in a new session'
-const IMPROVE = 'Improve prompt'
+const REFINE = 'Refine prompt'
 const HANDOFF =
   'The user chose to run this task in a new session. Start one with the start_session tool ' +
   '(initiation "user_asked", context "fresh"), using the prompt above as its brief, and do not do the task here.'
@@ -142,10 +142,10 @@ async function choose(
     if (options.length < 2) return { rating }
 
     const floor = FLOOR[rating] ? ` If it runs here, effort will be at least ${FLOOR[rating]}.` : ''
-    // Offered only where the dialog shows anyway, so it adds no question; /improve covers the rest.
+    // Offered only where the dialog shows anyway, so it adds no question; /refine-prompt covers the rest.
     const answer = await $.ui.ask(`This prompt looks ${rating}. Keep running it on ${current}?${floor}`, {
       header: 'Model',
-      options: canImprove ? [...options, IMPROVE] : options,
+      options: canImprove ? [...options, REFINE] : options,
     })
     return { rating, answer }
   } catch {
@@ -166,12 +166,12 @@ export const register: Register = on => {
   let improved = false
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'improve', description: 'Review a prompt and put an improved one in the prompt box', argumentHint: '<prompt>' })
+    await $.command.register({ name: 'refine-prompt', description: 'Review a prompt and put an improved one in the prompt box', argumentHint: '<prompt>' })
     return next(e)
   })
 
-  on('command.run', { command: 'improve' }, async ($, e) => {
-    if (!e.args.trim()) return { text: 'Usage: /improve <prompt>' }
+  on('command.run', { command: 'refine-prompt' }, async ($, e) => {
+    if (!e.args.trim()) return { text: 'Usage: /refine-prompt <prompt>' }
     const reviewed = await improve($, e.args)
     return { text: reviewed ? asMarkdown(reviewed) : 'The review failed; nothing was changed.' }
   }).catch(() => ({ text: 'The review failed; nothing was changed.' }))
@@ -183,7 +183,7 @@ export const register: Register = on => {
     if (rated === undefined) return next(e)
     const { rating, answer } = rated
     if (answer === NEW_SESSION) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
-    if (answer === IMPROVE && !improved) {
+    if (answer === REFINE && !improved) {
       improved = true
       const reviewed = await improve($, e.text)
       return reviewed === undefined ? next(e) : { drop: asLine(reviewed) }

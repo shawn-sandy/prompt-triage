@@ -20,7 +20,7 @@ desktop app it can also hand a complex task to a new session.
    start a fresh session with `start_session` instead of doing the task in
    this one. The mod cannot start the session itself, so it depends on Claude
    following that instruction.
-4. Whenever the dialog is shown, it also offers **Improve prompt** (see
+4. Whenever the dialog is shown, it also offers **Refine prompt** (see
    below). It does not add a dialog where none would be shown.
 5. When the suggestion matches your current model, nothing is asked, except
    that in the desktop app a `complex` prompt still offers the new session.
@@ -45,7 +45,7 @@ session; it applies whichever model you choose, and also when no dialog is
 shown.
 
 Nothing changes when the rating is `simple`, when you dismiss the dialog, when
-you choose **Open in a new session** or **Improve prompt**, or when the rating
+you choose **Open in a new session** or **Refine prompt**, or when the rating
 fails. Subagent requests, models that take no effort setting, and effort set
 as a number rather than a level are left alone.
 
@@ -57,7 +57,7 @@ override stays.
 
 ## Improving a prompt
 
-**Improve prompt** in the dialog holds the first prompt back instead of
+**Refine prompt** in the dialog holds the first prompt back instead of
 sending it. One call to `haiku` reviews it for a missing goal, scope or
 done-criteria, ambiguity, contradictions and unfilled placeholders such as
 `[Specify the files]`, and rewrites it to fix them.
@@ -81,26 +81,27 @@ fails, the prompt is sent as typed.
 For any prompt, at any point in the session, run the review by hand:
 
 ```text
-/improve <prompt>
+/refine-prompt <prompt>
 ```
 
 It asks the same questions, shows the issues and puts the rewrite in the prompt
-box. Nothing is sent until you press Enter.
+box. Nothing is sent until you press Enter. Versions up to 0.3.3 called this
+command `/improve`; that name no longer runs.
 
 ## Hooks
 
 The mod registers six hooks in `hooks/register.ts`. `prompt.submit` and
 `command.run` are also the names of calls, so these hooks run whenever a
-prompt is submitted or `/model`, `/effort` or `/improve` is run, whether you do it or
+prompt is submitted or `/model`, `/effort` or `/refine-prompt` is run, whether you do it or
 other code (the app, another mod) does. The mod never makes either call
 itself.
 
 | Hook | When it acts | What it may change |
 | --- | --- | --- |
-| `session.start` | Each session start. | Registers the `/improve` command. |
-| `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. When you choose **Improve prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
+| `session.start` | Each session start. | Registers the `/refine-prompt` command. |
+| `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override or an effort minimum is set. | Sets the request's model to the one you picked, and raises its effort to the minimum when it is lower. Subagent requests are left alone. |
-| `command.run` (`/improve` only) | Each run of `/improve`. | Reviews the prompt given, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
+| `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
 | `command.run` (`/effort` only) | Each run of `/effort`. | Leaves the command unchanged. Clears the effort minimum and its part of the status line. |
 
@@ -131,7 +132,7 @@ add the marketplace `shawn-sandy/prompt-triage`.
 ## Cost
 
 One small classification request on the first prompt of each session. Later
-prompts are not checked. Each **Improve prompt** or `/improve` adds one `haiku`
+prompts are not checked. Each **Refine prompt** or `/refine-prompt` adds one `haiku`
 request, and a second when you answer its questions.
 
 ## Limits
@@ -159,14 +160,14 @@ request, and a second when you answer its questions.
   or end in a common source extension, so a name such as `node.js` can be
   reported as missing. Words such as `and/or` are skipped, and so is a folder
   named without `./`, such as `src/components`.
-- Choosing **Improve prompt** skips the model choice for that prompt. The
+- Choosing **Refine prompt** skips the model choice for that prompt. The
   choice is offered again when you send the rewrite.
 
 ## Data
 
 The text of your first prompt is sent once per session to Claude Code's small,
 fast model through `$.model.classify`, to get the rating. When you choose
-**Improve prompt** or run `/improve`, that prompt is also sent to `haiku`
+**Refine prompt** or run `/refine-prompt`, that prompt is also sent to `haiku`
 through `$.model.complete` for the review, and sent again with your answers
 when you answer its questions. The path check reads only whether
 files exist, not their contents. The mod does not persist prompt data, the
@@ -187,7 +188,7 @@ claude plugin test .           # run hooks/register.test.ts
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the six hooks and the `/improve` command. |
+| `hooks/register.ts` | All of the mod's logic: the six hooks and the `/refine-prompt` command. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `hooks/hooks.json` | Points Claude Code at the mod: `{ "modules": ["./register.ts"] }`. |
 | `.claude-plugin/plugin.json` | The plugin manifest: name, `version`, description, icon. |

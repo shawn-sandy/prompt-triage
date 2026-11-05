@@ -112,7 +112,7 @@ test('a complex first prompt offers opus, and picking it routes main-loop reques
   const seen = engine(on, { answer: 'Switch to opus' })
 
   await submit($, 'Redesign the auth layer across three services')
-  expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Improve prompt']])
+  expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Refine prompt']])
   expect(seen.status).toEqual(['running opus, not claude-sonnet-5-5'])
 
   await step($)
@@ -218,7 +218,7 @@ test("the person's own /model ends the override", async ($, on) => {
 })
 
 test('improving the first prompt holds it back and puts the rewrite in the prompt box', async ($, on) => {
-  const seen = engine(on, { answer: 'Improve prompt', review: REVIEWED })
+  const seen = engine(on, { answer: 'Refine prompt', review: REVIEWED })
 
   const result = await submit($, 'Redesign the auth layer')
   expect(seen.submitted).toEqual([])
@@ -230,7 +230,7 @@ test('improving the first prompt holds it back and puts the rewrite in the promp
 })
 
 test('the improved prompt is rated again when sent, without offering another improvement', async ($, on) => {
-  const seen = engine(on, { answer: 'Improve prompt', review: REVIEWED })
+  const seen = engine(on, { answer: 'Refine prompt', review: REVIEWED })
 
   await submit($, 'Redesign the auth layer')
   await submit($, seen.filled[0]!)
@@ -239,7 +239,7 @@ test('the improved prompt is rated again when sent, without offering another imp
 })
 
 test('a path the prompt names that does not exist is reported', async ($, on) => {
-  const seen = engine(on, { answer: 'Improve prompt', review: REVIEWED, exists: false })
+  const seen = engine(on, { answer: 'Refine prompt', review: REVIEWED, exists: false })
 
   const result = await submit($, 'Fix the bug in src/auth/session.ts')
   expect(result.drop).toContain('src/auth/session.ts')
@@ -247,7 +247,7 @@ test('a path the prompt names that does not exist is reported', async ($, on) =>
 })
 
 test('a word with a slash is not checked as a path unless it looks like one', async ($, on) => {
-  engine(on, { answer: 'Improve prompt', review: REVIEWED, exists: false })
+  engine(on, { answer: 'Refine prompt', review: REVIEWED, exists: false })
 
   const result = await submit($, 'Support and/or filters in ./src/filters.ts')
   expect(result.drop).toContain('./src/filters.ts')
@@ -256,7 +256,7 @@ test('a word with a slash is not checked as a path unless it looks like one', as
 
 test('a path the rewrite names that does not exist is reported, and a glob is checked by its folder', async ($, on) => {
   const review = '<issues>\n</issues>\n<prompt>Lint every *.md file in scripts/triage/*.py and tools/gen/*.py.</prompt>'
-  engine(on, { answer: 'Improve prompt', review, exists: ['scripts/triage'] })
+  engine(on, { answer: 'Refine prompt', review, exists: ['scripts/triage'] })
 
   const result = await submit($, 'Lint every *.md file')
   expect(result.drop).toContain('tools/gen/*.py')
@@ -267,7 +267,7 @@ test('a path the rewrite names that does not exist is reported, and a glob is ch
 test('a path only the rewrite names is checked even when the prompt names ten', async ($, on) => {
   const named = Array.from({ length: 10 }, (_, i) => `a${i}.ts`)
   const review = `<issues>\n</issues>\n<prompt>Lint ${named.join(' ')} and ghost.ts.</prompt>`
-  engine(on, { answer: 'Improve prompt', review, exists: named })
+  engine(on, { answer: 'Refine prompt', review, exists: named })
 
   const result = await submit($, `Lint ${named.join(' ')}`)
   expect(result.drop).toContain('ghost.ts')
@@ -275,14 +275,14 @@ test('a path only the rewrite names is checked even when the prompt names ten', 
 
 test('a rewrite the prompt box could not take is shown exactly as written', async ($, on) => {
   const rewrite = 'Redesign auth:\n- api\n- web\n\n```\n  keep   this\n```'
-  engine(on, { answer: 'Improve prompt', review: `<issues>\n- No done-criteria\n</issues>\n<prompt>${rewrite}</prompt>`, isFilled: false })
+  engine(on, { answer: 'Refine prompt', review: `<issues>\n- No done-criteria\n</issues>\n<prompt>${rewrite}</prompt>`, isFilled: false })
 
   const result = await submit($, 'Redesign the auth layer')
   expect(result.drop).toContain(rewrite)
 })
 
 test('a failed review sends the prompt unchanged', async ($, on) => {
-  const seen = engine(on, { answer: 'Improve prompt' })
+  const seen = engine(on, { answer: 'Refine prompt' })
 
   const result = await submit($, 'Redesign the auth layer')
   expect(result.drop).toBeUndefined()
@@ -290,18 +290,30 @@ test('a failed review sends the prompt unchanged', async ($, on) => {
   expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
 })
 
-test('/improve reviews any prompt and puts the rewrite in the prompt box', async ($, on) => {
+test('a session start registers /refine-prompt, the name its command hook answers to', async ($, on) => {
+  const registered: string[] = []
+  on('command.register', (_$, e) => {
+    registered.push(e.name)
+    return { value: { command: e.name } }
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  expect(registered).toEqual(['refine-prompt'])
+})
+
+test('/refine-prompt reviews any prompt and puts the rewrite in the prompt box', async ($, on) => {
   const seen = engine(on, { turns: 3, review: REVIEWED })
 
-  const result = await command($, 'improve', 'Redesign the auth layer')
+  const result = await command($, 'refine-prompt', 'Redesign the auth layer')
   expect(seen.filled).toEqual(['Redesign auth in api, web and admin; done when tests pass.'])
   expect(result.text).toContain('\n- Which services?')
 })
 
-test('/improve with no prompt reviews nothing', async ($, on) => {
+test('/refine-prompt with no prompt reviews nothing', async ($, on) => {
   const seen = engine(on, { review: REVIEWED })
 
-  const result = await command($, 'improve')
+  const result = await command($, 'refine-prompt')
   expect(seen.filled).toEqual([])
   expect(result.text).toBeTruthy()
 })
@@ -311,7 +323,7 @@ const ASKS = `<issues>\n- Placeholders left unfilled\n</issues>\n${QUESTION}<pro
 const ANSWERED = '<issues>\n</issues>\n<prompt>Review hooks/register.ts.</prompt>'
 
 test('improving asks the questions only the person can answer, then rewrites with the answers', async ($, on) => {
-  const seen = engine(on, { answer: ['Improve prompt', 'Hook code'], review: [ASKS, ANSWERED] })
+  const seen = engine(on, { answer: ['Refine prompt', 'Hook code'], review: [ASKS, ANSWERED] })
 
   const result = await submit($, 'Review the workflow. [Specify the files.]')
   expect(seen.asked[1]).toEqual(['Hook code', 'Whole repo'])
@@ -322,7 +334,7 @@ test('improving asks the questions only the person can answer, then rewrites wit
 
 test('dismissing a question stops the questions and keeps the first rewrite', async ($, on) => {
   const two = ASKS.replace('<prompt>', '<question>\nDone when?\n- Tests pass\n- Reviewed\n</question>\n<prompt>')
-  const seen = engine(on, { answer: ['Improve prompt'], review: [two, ANSWERED] })
+  const seen = engine(on, { answer: ['Refine prompt'], review: [two, ANSWERED] })
 
   await submit($, 'Review the workflow.')
   expect(seen.asked.length).toBe(2)
@@ -333,7 +345,7 @@ test('dismissing a question stops the questions and keeps the first rewrite', as
 test('a question with fewer than two answers to pick from is not asked', async ($, on) => {
   const seen = engine(on, { turns: 3, review: '<issues>\n</issues>\n<question>\nWhich files?\n- All\n</question>\n<prompt>Review it.</prompt>' })
 
-  await command($, 'improve', 'Review the workflow.')
+  await command($, 'refine-prompt', 'Review the workflow.')
   expect(seen.asked).toEqual([])
   expect(seen.filled).toEqual(['Review it.'])
 })
@@ -342,12 +354,12 @@ test('only "- " lines count as answers to pick from', async ($, on) => {
   const review = '<issues>\n</issues>\n<question>\nWhich files?\n- All\n-\nIt depends on the scope.\n</question>\n<prompt>Review it.</prompt>'
   const seen = engine(on, { turns: 3, review })
 
-  await command($, 'improve', 'Review the workflow.')
+  await command($, 'refine-prompt', 'Review the workflow.')
   expect(seen.asked).toEqual([])
 })
 
 test('a second review that throws keeps the first rewrite', async ($, on) => {
-  const seen = engine(on, { answer: ['Improve prompt', 'Hook code'], review: [ASKS, THROW] })
+  const seen = engine(on, { answer: ['Refine prompt', 'Hook code'], review: [ASKS, THROW] })
 
   const result = await submit($, 'Review the workflow.')
   expect(seen.filled).toEqual(['Review the workflow.'])
@@ -355,11 +367,11 @@ test('a second review that throws keeps the first rewrite', async ($, on) => {
   expect(result.drop).toBeTruthy()
 })
 
-test('/improve asks at most three questions', async ($, on) => {
+test('/refine-prompt asks at most three questions', async ($, on) => {
   const many = `<issues>\n</issues>\n${QUESTION.repeat(4)}<prompt>Review the workflow.</prompt>`
   const seen = engine(on, { turns: 3, answer: ['Hook code', 'Hook code', 'Hook code', 'Hook code'], review: [many, ANSWERED] })
 
-  await command($, 'improve', 'Review the workflow.')
+  await command($, 'refine-prompt', 'Review the workflow.')
   expect(seen.asked.length).toBe(3)
   expect(seen.filled).toEqual(['Review hooks/register.ts.'])
 })
