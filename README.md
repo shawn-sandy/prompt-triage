@@ -4,62 +4,91 @@ A Claude Code mod that looks at the first prompt of each new session, rates
 how complex it is, offers to switch models before the work starts, and raises
 the effort level when it is too low for the task. It can
 also review a prompt and put an improved one in the prompt box. In the Claude
-desktop app it can also hand a complex task to a new session.
+desktop app it can also hand a complex or long-running task to a new session.
 
 ## What it does
 
 1. On the first prompt of a session (not a slash command, not a resumed
-   session), it rates the prompt `simple`, `moderate` or `complex` with one
-   call to the small, fast model.
+   session), it rates the prompt `simple`, `moderate`, `complex` or
+   `long-running` with one `haiku` call at effort `low`, against a written
+   rubric that defines each rating by the shape of the task:
+   - `simple`: a question with a short answer, a lookup, or a small edit in
+     one known place.
+   - `moderate`: an ordinary coding task with a clear goal in a few files.
+   - `complex`: work that needs design judgment or reasoning across a system,
+     done in one sitting.
+   - `long-running`: a large job meant to run on its own for hours, such as a
+     codebase-wide migration or a port to another framework.
 2. Each rating suggests a model: simple to `haiku`, moderate to `sonnet`,
-   complex to `opus`. When the suggestion differs from the model you are on,
-   a dialog asks whether to switch or keep the current model. Under "Other"
-   you can type a model name, such as `use sonnet`.
-3. In the desktop app, a `complex` rating also offers **Open in a new
-   session**. Choosing it adds context containing an instruction asking Claude to
+   complex to `opus`, long-running to `fable`. When the suggestion differs
+   from the model you are on, a dialog asks whether to switch or keep the
+   current model. Under "Other" you can type a model name, such as
+   `use sonnet` or `use fable`.
+3. For a `simple` prompt the dialog's first option is **Keep model, effort
+   low**: it keeps your model and runs the main conversation at effort `low`,
+   since lowering effort is often a better lever than switching models. The
+   switch to `haiku` is still offered after it.
+4. In the desktop app, a `complex` or `long-running` rating also offers
+   **Open in a new session**. Choosing it adds context containing an instruction asking Claude to
    start a fresh session with `start_session` instead of doing the task in
    this one. The mod cannot start the session itself, so it depends on Claude
    following that instruction.
-4. Whenever the dialog is shown, it also offers **Refine prompt** (see
-   below). It does not add a dialog where none would be shown.
-5. When the dialog is shown for a `moderate` or `complex` prompt, it opens
+5. Whenever the dialog is shown, it also offers **Refine prompt** (see
+   below). Neither it nor **Keep model, effort low** adds a dialog where none
+   would be shown.
+6. When the dialog is shown for a `moderate`, `complex` or `long-running`
+   prompt, it opens
    with a one-line restatement of what the prompt asks for, such as
    `Read as: add a retry limit to the upload client`, from one `haiku` call.
    The restatement is told to add no goal or reason you did not state, so a
    misread shows before the work starts; choose **Refine prompt** to fix it.
    If the call fails, the dialog is shown without it.
-6. When the suggestion matches your current model, nothing is asked, except
-   that in the desktop app a `complex` prompt still offers the new session.
-   Dismissing the dialog, or a failed rating, sends the prompt unchanged.
-7. Each rating also sets a minimum effort: none for simple, `medium` for
-   moderate, `high` for complex. See [Effort](#effort).
+7. When the suggestion matches your current model, nothing is asked, except
+   that in the desktop app a `complex` or `long-running` prompt still offers
+   the new session. Dismissing the dialog, or a failed rating (an error, a
+   timeout after 10 seconds, or a reply that names no single rating), sends
+   the prompt unchanged.
+8. Each rating also sets a minimum effort: none for simple, `medium` for
+   moderate, `high` for complex and long-running. See [Effort](#effort).
 
 The switch applies to the main conversation's requests for the rest of the
 session; subagents keep their own models. While it is in effect the status
 line shows `running <name>, not <session model>`, followed by
-`, effort raised to <level>` once the effort was raised (see [Effort](#effort)). The model picker and
+`, effort raised to <level>` once the effort was raised, or
+`, effort lowered to low` (see [Effort](#effort)). The model picker and
 `/model` still show the session's own setting, which is why the text names
 both. Running `/model` yourself ends the override.
 
 ## Effort
 
-After the first prompt is rated `moderate` or `complex`, any main-loop request
-whose effort is below the minimum is sent at the minimum instead. Effort that
-is already at or above it is left alone, so the mod only ever raises it. The
-dialog, when shown, says what the minimum is if the prompt runs in this
-session; it applies whichever model you choose, and also when no dialog is
-shown.
+After the first prompt is rated `moderate`, `complex` or `long-running`, any
+main-loop request whose effort is below the minimum is sent at the minimum
+instead. Effort that is already at or above it is left alone. The dialog, when
+shown, says what the minimum is if the prompt runs in this session; it applies
+whichever model you choose, and also when no dialog is shown.
 
-Nothing changes when the rating is `simple`, when you dismiss the dialog, when
-you choose **Open in a new session** or **Refine prompt**, or when the rating
-fails. Subagent requests, models that take no effort setting, and effort set
-as a number rather than a level are left alone.
+The minimums guard against an effort lowered by hand. At the Claude API's
+default effort (`high` on Fable 5.1 and Sonnet 5.5, `medium` on Opus 5.5 and
+Haiku 5.5, per Anthropic's
+[models overview](https://platform.claude.com/docs/en/about-claude/models/overview)),
+the `medium` minimum changes nothing; it acts only after you set `low`.
+
+Choosing **Keep model, effort low** for a `simple` prompt is the one case
+where the mod lowers effort: every main-loop request that names an effort
+level is sent at exactly `low`, and the status line shows
+`effort lowered to low` once a request was changed.
+
+Nothing changes when the rating is `simple` and you choose another option,
+when you dismiss the dialog, when you choose **Open in a new session** or
+**Refine prompt**, or when the rating fails. Subagent requests, models that
+take no effort setting, and effort set as a number rather than a level are
+left alone.
 
 The mod cannot read your effort before the first request, so it only knows it
 was too low once that request is sent. From then on the status line shows
 `effort raised to <level>`. The effort setting itself still shows the
-session's own value. Running `/effort` yourself ends the minimum; any model
-override stays.
+session's own value. Running `/effort` yourself ends the minimum or the
+lowered effort; any model override stays.
 
 ## Improving a prompt
 
@@ -82,7 +111,9 @@ the review made up is caught. A glob such as `src/*.ts` is checked by its
 folder. The issues are shown, and the
 rewrite is put in the prompt box for you to edit or send with Enter. Sent, the
 rewrite is rated again, without a second improvement offer. If the review
-fails, the prompt is sent as typed.
+fails, the prompt is sent as typed. The review's reply is capped at 4096
+tokens, or one token per two characters of the prompt when that is more (at
+most 64,000), so a long prompt's rewrite is not cut off.
 
 For any prompt, at any point in the session, run the review by hand:
 
@@ -106,10 +137,10 @@ itself.
 | --- | --- | --- |
 | `session.start` | Each session start. | Registers the `/refine-prompt` command. |
 | `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
-| `turn.step` | Each model request while an override or an effort minimum is set. | Sets the request's model to the one you picked, and raises its effort to the minimum when it is lower. Subagent requests are left alone. |
+| `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
-| `command.run` (`/effort` only) | Each run of `/effort`. | Leaves the command unchanged. Clears the effort minimum and its part of the status line. |
+| `command.run` (`/effort` only) | Each run of `/effort`. | Leaves the command unchanged. Clears the effort minimum or lowered effort and its part of the status line. |
 
 ## Install
 
@@ -137,25 +168,30 @@ add the marketplace `shawn-sandy/prompt-triage`.
 
 ## Cost
 
-One small classification request on the first prompt of each session. Later
-prompts are not checked. When the dialog is shown for a `moderate` or
-`complex` prompt, one `haiku` request restates it. Each **Refine prompt** or `/refine-prompt` adds one `haiku`
+One `haiku` request at effort `low`, with its reply capped at 256 tokens, on
+the first prompt of each session. Later prompts are not checked. When the
+dialog is shown for a `moderate`, `complex` or `long-running` prompt, one
+`haiku` request restates it. Each **Refine prompt** or `/refine-prompt` adds one `haiku`
 request, and a second when you answer its questions.
 
 ## Limits
 
-- The first prompt waits for the rating and, when a question is shown, for your
-  answer before it is sent. A `moderate` or `complex` prompt also waits up to
-  10 seconds for its restatement before the dialog appears.
+- The first prompt waits up to 10 seconds for the rating and, when a question
+  is shown, for your answer before it is sent. A `moderate`, `complex` or
+  `long-running` prompt also waits up to 10 seconds for its restatement before
+  the dialog appears.
 - Free text under "Other" switches the model if it names exactly one of
-  `haiku`, `sonnet` or `opus`, so `keep opus` switches to opus. Text naming
+  `haiku`, `sonnet`, `opus` or `fable`, so `keep opus` switches to opus. Text naming
   two, such as `not haiku, use opus`, switches nothing, and so does text with
   a no-word (no, not, don't, never, avoid, without), such as
   `no, don't use haiku`. That also means `no, use opus` switches nothing; use
   `/model` then.
-- A `complex` prompt on a model above opus, such as Fable, is not offered a
-  switch to opus. `simple` and `moderate` prompts are still offered the cheaper
-  model.
+- A `complex` prompt on a model above opus, such as Fable or Mythos, is not
+  offered a switch to opus, and a `long-running` prompt on Fable or Mythos is
+  not offered a switch to fable. A model name the mod does not recognize, such
+  as `Default (recommended)`, counts as strong enough for both, so it is never
+  offered a step down. `simple` and `moderate` prompts are still offered the
+  cheaper model.
 - The override and the effort minimum live in the mod's memory. If the mod
   reloads, the session goes back to its own model and effort.
 - Whether a request takes effort is read from the session's model. If you
@@ -173,9 +209,9 @@ request, and a second when you answer its questions.
 
 ## Data
 
-The text of your first prompt is sent once per session to Claude Code's small,
-fast model through `$.model.classify`, to get the rating. When the dialog is
-shown for a `moderate` or `complex` prompt, it is also sent to `haiku` through
+The text of your first prompt is sent once per session to `haiku` through
+`$.model.complete`, to get the rating. When the dialog is shown for a
+`moderate`, `complex` or `long-running` prompt, it is also sent to `haiku` through
 `$.model.complete` for the one-line restatement. When you choose
 **Refine prompt** or run `/refine-prompt`, that prompt is also sent to `haiku`
 through `$.model.complete` for the review, and sent again with your answers
@@ -194,12 +230,32 @@ claude plugin validate .       # check the manifest and hooks module
 claude plugin test .           # run hooks/register.test.ts
 ```
 
+### Evaluating the rating
+
+`evals/rating-prompts.json` holds 32 realistic first prompts, 8 per rating,
+each labeled with the rating it should get. `scripts/eval-rating.mjs` imports
+the rubric (`RATER`) and the reply parser (`parseRating`) from
+`hooks/register.ts`, rates each prompt through `claude -p` at `haiku` and
+effort `low`, and prints per-rating accuracy, a confusion table and the number
+of replies that named no rating. `--baseline` scores bare labels with no
+definitions instead, for comparison. It needs Node 24 and a signed-in Claude
+Code, not an API key, and it turns off user settings, MCP servers and skills so
+an installed prompt-triage cannot rate the eval's own prompts. The CLI adds its
+own system context, so scores are close to the mod's call but not identical.
+
+```bash
+node scripts/eval-rating.mjs
+node scripts/eval-rating.mjs --baseline
+```
+
 ### Layout
 
 | Path | What it is |
 | --- | --- |
 | `hooks/register.ts` | All of the mod's logic: the six hooks and the `/refine-prompt` command. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
+| `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
+| `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`. |
 | `hooks/hooks.json` | Points Claude Code at the mod: `{ "modules": ["./register.ts"] }`. |
 | `.claude-plugin/plugin.json` | The plugin manifest: name, `version`, description, icon. |
 | `.claude-plugin/marketplace.json` | Makes this repo a marketplace that lists the one plugin. |
