@@ -22,10 +22,16 @@ desktop app it can also hand a complex task to a new session.
    following that instruction.
 4. Whenever the dialog is shown, it also offers **Refine prompt** (see
    below). It does not add a dialog where none would be shown.
-5. When the suggestion matches your current model, nothing is asked, except
+5. When the dialog is shown for a `moderate` or `complex` prompt, it opens
+   with a one-line restatement of what the prompt asks for, such as
+   `Read as: add a retry limit to the upload client`, from one `haiku` call.
+   The restatement is told to add no goal or reason you did not state, so a
+   misread shows before the work starts; choose **Refine prompt** to fix it.
+   If the call fails, the dialog is shown without it.
+6. When the suggestion matches your current model, nothing is asked, except
    that in the desktop app a `complex` prompt still offers the new session.
    Dismissing the dialog, or a failed rating, sends the prompt unchanged.
-6. Each rating also sets a minimum effort: none for simple, `medium` for
+7. Each rating also sets a minimum effort: none for simple, `medium` for
    moderate, `high` for complex. See [Effort](#effort).
 
 The switch applies to the main conversation's requests for the rest of the
@@ -132,13 +138,15 @@ add the marketplace `shawn-sandy/prompt-triage`.
 ## Cost
 
 One small classification request on the first prompt of each session. Later
-prompts are not checked. Each **Refine prompt** or `/refine-prompt` adds one `haiku`
+prompts are not checked. When the dialog is shown for a `moderate` or
+`complex` prompt, one `haiku` request restates it. Each **Refine prompt** or `/refine-prompt` adds one `haiku`
 request, and a second when you answer its questions.
 
 ## Limits
 
 - The first prompt waits for the rating and, when a question is shown, for your
-  answer before it is sent.
+  answer before it is sent. A `moderate` or `complex` prompt also waits up to
+  10 seconds for its restatement before the dialog appears.
 - Free text under "Other" switches the model if it names exactly one of
   `haiku`, `sonnet` or `opus`, so `keep opus` switches to opus. Text naming
   two, such as `not haiku, use opus`, switches nothing, and so does text with
@@ -166,7 +174,9 @@ request, and a second when you answer its questions.
 ## Data
 
 The text of your first prompt is sent once per session to Claude Code's small,
-fast model through `$.model.classify`, to get the rating. When you choose
+fast model through `$.model.classify`, to get the rating. When the dialog is
+shown for a `moderate` or `complex` prompt, it is also sent to `haiku` through
+`$.model.complete` for the one-line restatement. When you choose
 **Refine prompt** or run `/refine-prompt`, that prompt is also sent to `haiku`
 through `$.model.complete` for the review, and sent again with your answers
 when you answer its questions. The path check reads only whether
