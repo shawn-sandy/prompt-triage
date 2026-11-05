@@ -15,6 +15,8 @@ type Setup = {
   exists?: boolean | string[]
   /** Whether the prompt box takes the rewrite; undefined takes it. */
   isFilled?: boolean
+  /** The restater's reply; undefined fails the call, and THROW rejects it. */
+  restate?: string
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -30,6 +32,8 @@ const take = (v: string | string[] | undefined) => (Array.isArray(v) ? v.shift()
 /** Answers, beneath the plugin, every engine call the mod makes. */
 function engine(on: On, s: Setup) {
   const asked: string[][] = []
+  const questions: string[] = []
+  const restated: string[] = []
   const submitted: PromptSubmitInput[] = []
   const steps: TurnStepInput[] = []
   const status: (string | undefined)[] = []
@@ -47,6 +51,7 @@ function engine(on: On, s: Setup) {
   on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => {
     const q = e.questions[0]!
     asked.push(q.options.map(o => o.label))
+    questions.push(q.question)
     const answer = take(s.answer)
     if (answer === undefined) return { deny: 'dismissed' }
     return { result: { questions: e.questions, answers: { [q.question]: answer } } }
@@ -65,8 +70,10 @@ function engine(on: On, s: Setup) {
   })
   on('command.run', () => ({ text: '' }))
   on('model.complete', (_$, e) => {
-    reviewed.push(e.prompt)
-    const text = take(s.review)
+    // The restater and the reviewer share this call; the restater's system prompt tells them apart.
+    const restating = e.system?.startsWith('You restate') ?? false
+    ;(restating ? restated : reviewed).push(e.prompt)
+    const text = restating ? s.restate : take(s.review)
     if (text === THROW) throw new Error('connection dropped')
     return {
       value:
@@ -82,7 +89,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { asked, submitted, steps, status, filled, reviewed, classified: () => classified }
+  return { asked, questions, submitted, steps, status, filled, reviewed, restated, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -446,4 +453,39 @@ test("/model after a raise keeps the effort part of the status line", async ($, 
   expect(seen.status.at(-1)).toBe('running opus, not claude-sonnet-5-5, effort raised to high')
   await command($, 'model', 'sonnet')
   expect(seen.status.at(-1)).toBe('effort raised to high')
+})
+
+test('the model dialog shows a one-line restatement of a complex prompt', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep current model', restate: 'Redesign auth across three services.\nA second line.' })
+
+  await submit($, 'Redesign the auth layer across three services')
+  expect(seen.restated.length).toBe(1)
+  expect(seen.questions[0]).toContain('Redesign auth across three services')
+  expect(seen.questions[0]).not.toContain('A second line')
+  expect(seen.questions[0]).toContain('looks complex')
+})
+
+for (const [how, restate] of [['failed', undefined], ['rejected', THROW]] as const) {
+  test(`a ${how} restatement still shows the dialog without one`, async ($, on) => {
+    const seen = engine(on, { answer: 'Keep current model', ...(restate ? { restate } : {}) })
+    await submit($, 'Redesign the auth layer')
+    expect(seen.restated.length).toBe(1)
+    expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Refine prompt']])
+    expect(seen.questions[0]).toMatch(/^This prompt looks complex/)
+    expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
+  })
+}
+
+test('a simple prompt is not restated', async ($, on) => {
+  const simple = engine(on, { rating: 'simple', answer: 'Keep current model', restate: 'Fix a typo.' })
+  await submit($, 'Fix a typo')
+  expect(simple.asked.length).toBe(1)
+  expect(simple.restated).toEqual([])
+})
+
+test('a prompt that needs no dialog is not restated', async ($, on) => {
+  const seen = engine(on, { rating: 'moderate', model: 'claude-sonnet-5-5', restate: 'Rename a function.' })
+  await submit($, 'Rename this function')
+  expect(seen.asked).toEqual([])
+  expect(seen.restated).toEqual([])
 })
