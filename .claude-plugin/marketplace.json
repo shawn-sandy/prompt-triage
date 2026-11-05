@@ -6,7 +6,7 @@
     {
       "name": "prompt-triage",
       "source": "./",
-      "description": "Rates the first prompt of a session and offers to switch models, improve the prompt, or hand the task to a new session."
+      "description": "Rates the first prompt of a session and offers to switch models, refine the prompt, or hand the task to a new session."
     }
   ]
 }
