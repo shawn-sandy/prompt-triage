@@ -85,7 +85,8 @@ For any prompt, at any point in the session, run the review by hand:
 ```
 
 It asks the same questions, shows the issues and puts the rewrite in the prompt
-box. Nothing is sent until you press Enter.
+box. Nothing is sent until you press Enter. Versions up to 0.3.3 called this
+command `/improve`; that name no longer runs.
 
 ## Hooks
 

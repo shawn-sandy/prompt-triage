@@ -290,6 +290,18 @@ test('a failed review sends the prompt unchanged', async ($, on) => {
   expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
 })
 
+test('a session start registers /refine-prompt, the name its command hook answers to', async ($, on) => {
+  const registered: string[] = []
+  on('command.register', (_$, e) => {
+    registered.push(e.name)
+    return { value: { command: e.name } }
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  expect(registered).toEqual(['refine-prompt'])
+})
+
 test('/refine-prompt reviews any prompt and puts the rewrite in the prompt box', async ($, on) => {
   const seen = engine(on, { turns: 3, review: REVIEWED })
 
