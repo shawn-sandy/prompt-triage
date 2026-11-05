@@ -1,0 +1,37 @@
+[
+  { "expected": "simple", "prompt": "What does git rebase --onto do?" },
+  { "expected": "simple", "prompt": "Fix the typo 'recieve' in src/api/messages.ts" },
+  { "expected": "simple", "prompt": "Rename the variable usr to user in lib/session.py" },
+  { "expected": "simple", "prompt": "What's the difference between let and const in JavaScript?" },
+  { "expected": "simple", "prompt": "Run the test suite and tell me if anything fails" },
+  { "expected": "simple", "prompt": "Explain this error: TypeError: Cannot read properties of undefined (reading 'map')" },
+  { "expected": "simple", "prompt": "Bump the version in package.json to 2.4.1" },
+  { "expected": "simple", "prompt": "Where is the database connection string configured in this repo?" },
+
+  { "expected": "moderate", "prompt": "Add a --verbose flag to the CLI in cmd/root.go that prints each request URL before it is sent" },
+  { "expected": "moderate", "prompt": "Write unit tests for the date helpers in src/utils/dates.ts, covering leap years and invalid input" },
+  { "expected": "moderate", "prompt": "The signup form accepts an empty email because the required check runs after trim. Fix it and add a test." },
+  { "expected": "moderate", "prompt": "Add pagination to the GET /orders endpoint with limit and cursor query parameters" },
+  { "expected": "moderate", "prompt": "Refactor the 300-line handleCheckout function in checkout.js into smaller functions without changing behavior" },
+  { "expected": "moderate", "prompt": "Add a dark mode toggle to the settings page that saves the choice in localStorage" },
+  { "expected": "moderate", "prompt": "Replace moment.js with date-fns in the three files under src/reports/" },
+  { "expected": "moderate", "prompt": "Add retry with exponential backoff to the fetchPrices function when the API returns 429" },
+
+  { "expected": "complex", "prompt": "Users are intermittently logged out every few hours and we can't reproduce it locally. Find the cause across the auth service, the API gateway and the web client, and fix it." },
+  { "expected": "complex", "prompt": "Redesign the permissions model so organizations can define custom roles, and update the API, the database schema and the admin UI to match" },
+  { "expected": "complex", "prompt": "We have a race condition where two workers sometimes process the same job from the queue. Figure out why and fix it without losing throughput." },
+  { "expected": "complex", "prompt": "Design a caching layer for the product catalog service that stays consistent when prices change, and implement it" },
+  { "expected": "complex", "prompt": "Audit the file upload endpoints for security issues such as path traversal, MIME spoofing and size limits, and fix what you find" },
+  { "expected": "complex", "prompt": "Memory usage grows steadily in production until the pods are OOM-killed after about a day. Profile it, find the leak and fix it." },
+  { "expected": "complex", "prompt": "Split the monolithic OrderService into separate pricing, inventory and fulfillment modules with clear interfaces, updating every caller" },
+  { "expected": "complex", "prompt": "Our p99 latency for search doubled after last week's deploy. Work out which change caused it and fix it." },
+
+  { "expected": "long-running", "prompt": "Migrate the entire codebase from JavaScript to TypeScript with strict mode on, file by file, keeping the tests green after each step" },
+  { "expected": "long-running", "prompt": "Port this Flask application to FastAPI, including all 60 routes, the auth middleware and the test suite" },
+  { "expected": "long-running", "prompt": "Work through every open issue labeled 'good first issue' in this repo, fixing each one with a test and a separate commit" },
+  { "expected": "long-running", "prompt": "Build a complete inventory management app from scratch: a Postgres schema, a REST API, a React frontend, auth, and end-to-end tests" },
+  { "expected": "long-running", "prompt": "Upgrade the monorepo from React 16 to React 19 across all 40 packages, fixing every breaking change and deprecated API along the way" },
+  { "expected": "long-running", "prompt": "Rewrite the Python data pipeline in Rust, module by module, and verify each module's output matches the Python version on the sample data" },
+  { "expected": "long-running", "prompt": "Replace our hand-rolled ORM with Prisma across the whole backend, migrating every query, model and migration file, and run the full suite as you go" },
+  { "expected": "long-running", "prompt": "Bring test coverage of the whole backend from 30% to 80%, working through each module in turn until the target is met" }
+]
