@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="proto-source" content="">
+<meta name="proto-created" content="2026-11-06">
+<title>Refine Prompt Band</title>
+<style>
+  /* Layout: page column with the mock Claude Code frame first, prototype controls beside it on wide screens, stacked on narrow ones. */
+  :root {
+    --bg: #f5f6f4; --surface: #ffffff; --fg: #17191a; --muted: #5a625e; --line: #dce1dd;
+    --accent: #157a37; --accent-soft: #e2f3e7;
+    --frame: #141615; --frame-2: #1d201e; --frame-line: #2e3330; --ink: #e9ece9; --dim: #8e9692;
+    --green: #28d05a; --red: #f2385a; --red-soft: #3a1820; --amber: #e6b450;
+    --f-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --f-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --radius: 8px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #101211; --surface: #181b19; --fg: #e7ebe8; --muted: #a0a8a4; --line: #2b302d;
+            --accent: #4fd979; --accent-soft: #17311f; color-scheme: dark; }
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--f-ui);
+         padding: 28px max(16px, env(safe-area-inset-left, 0px)) 56px max(16px, env(safe-area-inset-right, 0px)); }
+  .page { max-width: 1120px; margin: 0 auto; display: grid; gap: 22px; }
+  header { display: grid; gap: 6px; }
+  h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.01em; text-wrap: balance; }
+  h2 { margin: 0; font-size: 1rem; }
+  p { margin: 0; }
+  .source { font: 12px var(--f-mono); color: var(--muted); }
+  .lede { color: var(--muted); max-width: 72ch; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+  @media (max-width: 860px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+  button, select, input, textarea { font: inherit; }
+  :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+  /* Mock Claude Code frame */
+  .frame { background: var(--frame); color: var(--ink); border-radius: var(--radius); font: 13.5px/1.6 var(--f-mono);
+           display: grid; grid-template-rows: auto minmax(220px, 1fr) auto auto auto; min-width: 0; position: relative; }
+  .titlebar { display: flex; gap: 10px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--frame-line); color: var(--dim); font-size: 12px; }
+  .titlebar b { color: var(--ink); font-weight: 500; }
+  .transcript { padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; max-height: 360px; }
+  .msg-user { color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg-user::before { content: "> "; color: var(--green); }
+  .msg-dim { color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .blocked { border: 1px solid #4a2a31; background: var(--red-soft); border-radius: 8px; overflow: hidden; }
+  .blocked .head { display: flex; gap: 8px; align-items: center; padding: 8px 12px; color: var(--ink); font-family: var(--f-ui); font-weight: 600; border-bottom: 1px solid #4a2a31; }
+  .blocked .head span { color: var(--red); }
+  .blocked .body { padding: 10px 12px; color: #c9b9bd; font-family: var(--f-ui); font-size: 13px; }
+  .tag { display: inline-block; font: 600 10px/1 var(--f-ui); letter-spacing: .06em; text-transform: uppercase; padding: 3px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
+  .tag.now { background: #4a2a31; color: #ffb3c1; }
+  .tag.new { background: #1d3b27; color: #8ff0ad; }
+
+  /* The band */
+  .band { border-top: 1px solid var(--frame-line); background: var(--frame-2); padding: 8px 14px; display: grid; gap: 6px; }
+  .band[hidden] { display: none; }
+  .band-row { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+  .band-label { color: var(--dim); }
+  .pick { display: inline-flex; align-items: center; gap: 4px; color: var(--dim); }
+  .pick select { background: transparent; color: var(--ink); border: 0; border-bottom: 1px dotted var(--dim); padding: 1px 2px; font: inherit; cursor: pointer; }
+  .pick select option { background: var(--frame-2); color: var(--ink); }
+  .bbtn { background: transparent; border: 0; color: var(--green); padding: 2px 4px; cursor: pointer; font: inherit; border-radius: 4px; }
+  .bbtn:hover { background: #26302a; }
+  .bbtn .key { color: var(--amber); }
+  .bbtn.muted { color: var(--ink); }
+  .bbtn[disabled] { color: var(--dim); cursor: default; }
+  .issues { margin: 0; padding-left: 1.4em; color: var(--ink); display: grid; gap: 2px; }
+  .issues li { overflow-wrap: anywhere; }
+  .issues .skip { color: var(--amber); }
+  .count { color: var(--amber); }
+  .band-hint { color: var(--dim); font-size: 12px; padding: 4px 14px; border-top: 1px solid var(--frame-line); }
+
+  /* Composer */
+  .composer { border-top: 1px solid var(--frame-line); padding: 10px 14px 12px; display: grid; gap: 6px; }
+  .composer textarea { width: 100%; min-height: 76px; resize: vertical; background: #0e100f; color: var(--ink); border: 1px solid var(--frame-line);
+                       border-radius: 6px; padding: 8px 10px; font: inherit; }
+  .composer-foot { display: flex; justify-content: space-between; gap: 10px; color: var(--dim); font-size: 12px; flex-wrap: wrap; }
+  .send { background: var(--green); color: #08210f; border: 0; border-radius: 5px; padding: 3px 12px; font: 600 12px var(--f-ui); cursor: pointer; }
+
+  /* Question dialog, styled after the engine's AskUserQuestion */
+  .overlay { position: absolute; inset: 0; border-radius: inherit; background: rgba(0,0,0,.55); display: flex; align-items: flex-end; justify-content: center; padding: 14px; }
+  .overlay[hidden] { display: none; }
+  .dialog { width: 100%; max-width: 620px; background: var(--frame-2); border: 1px solid var(--frame-line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; font-family: var(--f-ui); font-size: 14px; }
+  .dialog .chip { justify-self: start; font: 600 11px/1 var(--f-ui); letter-spacing: .05em; text-transform: uppercase; color: #08210f; background: var(--green); padding: 4px 8px; border-radius: 999px; }
+  .dialog .q { color: var(--ink); overflow-wrap: anywhere; }
+  .opts { display: grid; gap: 6px; }
+  .opt { text-align: left; background: #232825; color: var(--ink); border: 1px solid var(--frame-line); border-radius: 6px; padding: 7px 10px; cursor: pointer; }
+  .opt:hover { border-color: var(--green); }
+  .opt .n { color: var(--amber); font-family: var(--f-mono); margin-right: 8px; }
+  .other { display: flex; gap: 6px; }
+  .other input { flex: 1; min-width: 0; background: #0e100f; color: var(--ink); border: 1px solid var(--frame-line); border-radius: 6px; padding: 6px 8px; }
+  .dialog-foot { color: var(--dim); font-size: 12px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+  .linkbtn { background: none; border: 0; color: var(--dim); text-decoration: underline; cursor: pointer; padding: 0; font: inherit; }
+
+  /* Side panel */
+  aside { display: grid; gap: 16px; min-width: 0; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; display: grid; gap: 10px; }
+  .card label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  .card select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  .card ol, .card ul { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; font-size: 14px; }
+  .reset { justify-self: start; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .status { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  code { font-family: var(--f-mono); font-size: .9em; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <h1>Refine Prompt Band</h1>
+    <div class="source">Prototype &middot; from docs/proposals/refine-band.md &middot; simulated: no model calls, canned review</div>
+    <p class="lede">A clickable mockup of the proposed prompt-triage band. Type or edit the draft, pick options in the band, press <b>Refine</b>. Or press Enter on the first prompt to see the model dialog path, and compare the current "blocked" warning with the proposed notice.</p>
+  </header>
+
+  <div class="layout">
+    <section class="frame" id="frame" aria-label="Mock Claude Code session">
+      <div class="titlebar"><b>Claude Code</b><span>Opus 5.5</span><span>&middot; prompt-triage (prototype)</span></div>
+      <div class="transcript" id="transcript" aria-live="polite"></div>
+
+      <div class="band" id="band" role="group" aria-label="Refine band"></div>
+      <div class="band-hint" id="band-hint" hidden></div>
+
+      <div class="composer">
+        <label class="status" for="draft">Prompt</label>
+        <textarea id="draft" spellcheck="false"></textarea>
+        <div class="composer-foot">
+          <span>Enter to send &middot; Shift+Enter for a new line &middot; in the band, <code>r</code> presses Refine</span>
+          <button type="button" class="send" id="send">Send</button>
+        </div>
+      </div>
+
+      <div class="overlay" id="overlay" hidden>
+        <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-q">
+          <span class="chip" id="dlg-chip">Clarify</span>
+          <p class="q" id="dlg-q"></p>
+          <div class="opts" id="dlg-opts"></div>
+          <form class="other" id="dlg-other">
+            <label class="status" for="dlg-other-input">Other</label>
+            <input id="dlg-other-input" placeholder="Other: type your own answer" autocomplete="off">
+            <button type="submit" class="opt">Use</button>
+          </form>
+          <div class="dialog-foot"><span id="dlg-step"></span><button type="button" class="linkbtn" id="dlg-dismiss">Dismiss (Esc)</button></div>
+        </div>
+      </div>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <aside>
+      <div class="card">
+        <h2>Prototype controls</h2>
+        <label>Band setting (<code>userConfig.band</code>)
+          <select id="cfg-band">
+            <option value="long">long: drafts of 40+ characters or with a line break</option>
+            <option value="always">always</option>
+            <option value="never">never</option>
+          </select>
+        </label>
+        <label>Dialog path message
+          <select id="cfg-drop">
+            <option value="proposed">Proposed: one-line notice + band issue list</option>
+            <option value="current">Current: "A hook blocked your prompt"</option>
+          </select>
+        </label>
+        <button type="button" class="reset" id="reset">Reset to sample draft</button>
+      </div>
+      <div class="card">
+        <h2>What to validate</h2>
+        <ol>
+          <li>Do the four pickers read clearly in one row, and do the defaults leave a prompt alone?</li>
+          <li>After <b>Refine</b>, is the rewrite in the box and the issue list easy to find under <b>Show issues</b>?</li>
+          <li>Does <b>Restore original</b> put back exactly what you typed?</li>
+          <li>On the first prompt, choose <b>Refine prompt</b> in the model dialog under both message settings. Is the one-line notice clearer than the red warning?</li>
+          <li>Pick Workflow <b>Interview me</b> with Goal <b>As /goal</b>: does the result row say which pick was not applied?</li>
+        </ol>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<script>
+(function () {
+  var STORE_KEY = "proto-refine-prompt-band";
+  var SAMPLE = "Set up GitHub releases for the current version. Check the existing setup first and think hard about it. IMPORTANT: don't break the bump-version workflow.";
+  var PICKS = {
+    goal: { label: "Goal", options: [["auto", "Auto"], ["check", "Add a check"], ["goal", "As /goal"], ["off", "Off"]] },
+    workflow: { label: "Workflow", options: [["as", "As written"], ["plan", "Plan first"], ["interview", "Interview me"], ["test", "Test first"]] },
+    scope: { label: "Scope", options: [["as", "As written"], ["minimal", "Minimal"], ["ambitious", "Ambitious"]] },
+    run: { label: "Run", options: [["watching", "Watching"], ["unattended", "Unattended"]] }
+  };
+  var DEFAULTS = { picks: { goal: "auto", workflow: "as", scope: "as", run: "watching" }, band: "long", drop: "proposed" };
+
+  function loadPrefs() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      var p = raw ? JSON.parse(raw) : null;
+      if (!p || typeof p !== "object" || !p.picks) return JSON.parse(JSON.stringify(DEFAULTS));
+      return { picks: Object.assign({}, DEFAULTS.picks, p.picks), band: p.band || DEFAULTS.band, drop: p.drop || DEFAULTS.drop };
+    } catch (e) { return JSON.parse(JSON.stringify(DEFAULTS)); }
+  }
+  function savePrefs() { try { localStorage.setItem(STORE_KEY, JSON.stringify(prefs)); } catch (e) {} }
+
+  var prefs = loadPrefs();
+  var state = { firstSent: false, offeredRefine: true, busy: false, original: null, result: null, showIssues: false };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var draft = $("draft"), band = $("band"), hint = $("band-hint"), transcript = $("transcript"), statusEl = $("status");
+
+  function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+  function announce(t) { statusEl.textContent = t; }
+  function addLine(cls, text) { var n = el("div", cls, text); transcript.appendChild(n); transcript.scrollTop = transcript.scrollHeight; return n; }
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function pickLabel(key) { var o = PICKS[key].options; for (var i = 0; i < o.length; i++) if (o[i][0] === prefs.picks[key]) return o[i][1]; return ""; }
+
+  /* ---------- The band ---------- */
+  function bandVisible() {
+    var t = draft.value;
+    if (prefs.band === "never" || !t.trim() || t.trim().charAt(0) === "/") return false;
+    return prefs.band === "always" || t.length >= 40 || t.indexOf("\n") >= 0;
+  }
+
+  function renderBand() {
+    while (band.firstChild) band.removeChild(band.firstChild);
+    hint.hidden = true;
+    if (state.result) { renderResult(); band.hidden = false; return; }
+    if (!bandVisible()) {
+      band.hidden = true;
+      if (prefs.band !== "never" && draft.value.trim() && draft.value.trim().charAt(0) !== "/") {
+        hint.hidden = false; hint.textContent = "Band hidden: the draft is under 40 characters (setting: long).";
+      }
+      return;
+    }
+    band.hidden = false;
+    var row = el("div", "band-row");
+    row.appendChild(el("span", "band-label", "Refine"));
+    Object.keys(PICKS).forEach(function (key) {
+      var wrap = el("label", "pick");
+      wrap.appendChild(document.createTextNode(PICKS[key].label + ":"));
+      var sel = el("select"); sel.id = "pick-" + key;
+      PICKS[key].options.forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; sel.appendChild(op); });
+      sel.value = prefs.picks[key];
+      sel.addEventListener("change", function () { prefs.picks[key] = sel.value; savePrefs(); });
+      wrap.appendChild(sel); row.appendChild(wrap);
+    });
+    var btn = el("button", "bbtn"); btn.type = "button"; btn.id = "refine-btn";
+    btn.appendChild(el("span", "key", "[r] ")); btn.appendChild(document.createTextNode(state.busy ? "Reviewing with haiku..." : "Refine"));
+    btn.disabled = state.busy;
+    btn.addEventListener("click", function () { refine("band"); });
+    row.appendChild(btn);
+    band.appendChild(row);
+  }
+
+  function renderResult() {
+    var r = state.result;
+    var row = el("div", "band-row");
+    row.appendChild(el("span", "band-label", "Refined"));
+    var n = r.issues.length;
+    row.appendChild(el("span", "count", n + (n === 1 ? " issue" : " issues")));
+    var show = el("button", "bbtn muted", state.showIssues ? "Hide issues" : "Show issues"); show.type = "button"; show.id = "show-issues";
+    show.setAttribute("aria-expanded", String(state.showIssues));
+    show.addEventListener("click", function () { state.showIssues = !state.showIssues; renderBand(); $("show-issues").focus(); });
+    var restore = el("button", "bbtn muted", "Restore original"); restore.type = "button"; restore.id = "restore";
+    restore.addEventListener("click", function () {
+      draft.value = state.original; state.result = null; state.showIssues = false; renderBand(); draft.focus(); announce("Original prompt restored.");
+    });
+    var done = el("button", "bbtn", "Done"); done.type = "button"; done.id = "done";
+    done.addEventListener("click", function () { state.result = null; state.showIssues = false; renderBand(); draft.focus(); });
+    row.appendChild(show); row.appendChild(restore); row.appendChild(done);
+    band.appendChild(row);
+    if (state.showIssues) {
+      var ul = el("ul", "issues"); ul.id = "issue-list";
+      r.issues.forEach(function (i) { ul.appendChild(el("li", i.indexOf("not applied") >= 0 ? "skip" : null, i)); });
+      if (!n) ul.appendChild(el("li", null, "No issues found."));
+      band.appendChild(ul);
+    }
+  }
+
+  band.addEventListener("keydown", function (ev) {
+    if (ev.key.toLowerCase() === "r" && ev.target.tagName !== "SELECT" && !state.result && !state.busy) { ev.preventDefault(); refine("band"); }
+  });
+
+  /* ---------- Question dialog ---------- */
+  var overlay = $("overlay");
+  function ask(chip, question, options, stepText) {
+    return new Promise(function (resolve) {
+      $("dlg-chip").textContent = chip; $("dlg-q").textContent = question; $("dlg-step").textContent = stepText || "";
+      var box = $("dlg-opts"); while (box.firstChild) box.removeChild(box.firstChild);
+      var input = $("dlg-other-input"); input.value = "";
+      var lastFocus = document.activeElement;
+      function finish(v) {
+        overlay.hidden = true; document.removeEventListener("keydown", onKey); $("dlg-other").onsubmit = null; $("dlg-dismiss").onclick = null;
+        if (lastFocus && lastFocus.focus) lastFocus.focus(); resolve(v);
+      }
+      function onKey(ev) {
+        if (ev.key === "Escape") { ev.preventDefault(); finish(null); }
+        else if (/^[1-4]$/.test(ev.key) && document.activeElement !== input) { var b = box.children[Number(ev.key) - 1]; if (b) { ev.preventDefault(); b.click(); } }
+      }
+      options.forEach(function (o, i) {
+        var b = el("button", "opt"); b.type = "button"; b.appendChild(el("span", "n", String(i + 1))); b.appendChild(document.createTextNode(o));
+        b.addEventListener("click", function () { finish(o); }); box.appendChild(b);
+      });
+      $("dlg-other").onsubmit = function (ev) { ev.preventDefault(); var v = input.value.trim(); if (v) finish(v); };
+      $("dlg-dismiss").onclick = function () { finish(null); };
+      document.addEventListener("keydown", onKey);
+      overlay.hidden = false; box.firstChild.focus();
+    });
+  }
+
+  /* ---------- Canned review (stands in for the haiku call) ---------- */
+  var OBSOLETE = [
+    [/\s*\b(?:and\s+)?think (?:hard|harder)(?: about it)?/gi, "\"think hard\": effort is the control for how hard Claude thinks"],
+    [/\s*\bbe thorough\b/gi, "\"be thorough\": effort is the control, not prompt wording"],
+    [/\s*\bdon'?t be lazy\b\.?/gi, "\"don't be lazy\": current models carry on without it and may over-work"],
+    [/\s*\bkeep going until (?:it'?s )?done\b\.?/gi, "\"keep going until done\": give Claude a check to pass instead"],
+    [/\bIMPORTANT:\s*/g, "\"IMPORTANT:\" emphasis: current models follow plain wording"]
+  ];
+
+  function clean(text) {
+    var removed = [], out = text;
+    OBSOLETE.forEach(function (o) { if (o[0].test(out)) { removed.push("Removed " + o[1] + "."); out = out.replace(o[0], ""); } o[0].lastIndex = 0; });
+    out = out.replace(/\s+\./g, ".").replace(/[ \t]{2,}/g, " ").trim()
+      .replace(/(^|[.!?]\s+)([a-z])/g, function (m, pre, ch) { return pre + ch.toUpperCase(); });
+    return { text: out, removed: removed };
+  }
+
+  function questionsFor(text, p) {
+    var qs = [];
+    if (/release/i.test(text) && /current version/i.test(text))
+      qs.push({ id: "version", q: "Which version should the release use?", o: ["The version in .claude-plugin/plugin.json", "The latest git tag", "The version in package.json"] });
+    if (p.goal === "check") qs.push({ id: "check", q: "What check proves it is done?", o: ["A test tag triggers the workflow and it passes", "npm test exits 0", "A screenshot of the result"] });
+    if (p.goal === "goal" && p.workflow !== "interview") qs.push({ id: "end", q: "What end state should /goal check for?", o: ["A GitHub release exists for the current version", "The workflow file is committed and its run passes", "All tests pass and lint is clean"] });
+    if (p.scope === "ambitious") qs.push({ id: "extras", q: "Which extras should it include?", o: ["Release notes from the changelog", "Error handling for an existing release", "Docs for the new workflow"] });
+    if (p.run === "unattended") qs.push({ id: "touch", q: "What may it touch while unattended?", o: ["This branch only, no push", "This branch, push allowed, no merge", "Anything in this repository"] });
+    if (!qs.length) qs.push({ id: "keep", q: "What must stay unchanged?", o: ["Existing workflows", "Public APIs", "Nothing in particular"] });
+    return qs.slice(0, 3);
+  }
+
+  function lcFirst(s) { return s ? s.charAt(0).toLowerCase() + s.slice(1) : s; }
+
+  function review(text, p, asked, answers) {
+    var c = clean(text), issues = c.removed.slice(), body = c.text, tail = [];
+    var a = function (id) { return answers[id]; };
+    if (a("version")) body += " Use " + lcFirst(a("version")).replace(/^the /, "the ") + ".";
+    else if (/release/i.test(text)) issues.push("The current version is never stated, or where it is recorded.");
+    if (/release/i.test(text)) issues.push("It does not say what to do if GitHub releases already exist.");
+    if (a("keep") && a("keep") !== "Nothing in particular") body += " Leave " + lcFirst(a("keep")) + " unchanged.";
+
+    var goalSkipped = p.goal === "goal" && p.workflow === "interview";
+    if (p.workflow === "interview") body = "I want to " + lcFirst(body.replace(/\.$/, "")) + ". I haven't pinned down the details. Interview me until you could write the spec, then write it to SPEC.md.";
+    if (p.workflow === "plan") { tail.push("Read the relevant code first and propose a plan. Make no edits until I approve it."); issues.push("Shift+Tab cycles to plan mode if you want Claude Code to enforce the no-edit step."); }
+    if (p.workflow === "test") tail.push("Start with a failing test that reproduces the problem, then make it pass.");
+    if (p.scope === "minimal") tail.push("Change only what this asks for: no extra files, abstractions or refactors.");
+    if (p.scope === "ambitious") { if (a("extras")) tail.push("Be ambitious: include " + lcFirst(a("extras")) + ", not just the minimum."); else issues.push("Scope is Ambitious but no extras were named, so none were added."); }
+    if (p.goal === "check") { if (a("check")) tail.push("Done when: " + lcFirst(a("check")) + ". Show me the command you ran and its output."); else issues.push("No check was named, so no done-condition was added."); }
+    if (p.goal === "auto" && !/\b(done|pass|passes|test|check)\b/i.test(c.text) && !a("check")) issues.push("It does not say what done looks like.");
+    if (p.run === "unattended") {
+      if (a("touch")) tail.push("This runs unattended. It may touch: " + lcFirst(a("touch")) + ".");
+      issues.push("Unattended: it does not say what stops the run (a turn or spend cap).");
+      issues.push("Unattended: it does not say where the result goes or who signs off.");
+    }
+    asked.forEach(function (q) { if (!answers[q.id]) issues.push("Not answered: " + q.q); });
+    if (goalSkipped) issues.push("Goal: As /goal was not applied, because Workflow: Interview me comes first.");
+
+    var rewrite = body + (tail.length ? "\n\n" + tail.join("\n") : "");
+    if (p.goal === "goal" && !goalSkipped) {
+      var end = a("end") ? lcFirst(a("end")) : "the task above is complete";
+      rewrite = "/goal " + end + ". Task: " + body.replace(/\s+/g, " ") + (tail.length ? " " + tail.join(" ") : "") + " Nothing outside this task changes. Stop after 30 turns.";
+      if (!a("end")) issues.push("No end state was named for /goal; review the condition before sending.");
+    }
+    return { rewrite: rewrite, issues: issues };
+  }
+
+  async function refine(source) {
+    var text = draft.value;
+    if (!text.trim() || state.busy) return;
+    state.busy = true; state.original = text; state.result = null; renderBand();
+    announce("Reviewing the prompt.");
+    await wait(700);
+    var asked = questionsFor(text, prefs.picks), answers = {};
+    for (var i = 0; i < asked.length; i++) {
+      var ans = await ask("Clarify", asked[i].q, asked[i].o, "Question " + (i + 1) + " of " + asked.length);
+      if (!ans) break;
+      answers[asked[i].id] = ans;
+    }
+    var r = review(text, prefs.picks, asked, answers);
+    draft.value = r.rewrite;
+    state.busy = false; state.result = r; state.showIssues = false; state.offeredRefine = false;
+    if (source === "dialog") dialogNotice(r);
+    renderBand();
+    announce("The improved prompt is in the prompt box. " + r.issues.length + " issues.");
+    draft.focus();
+  }
+
+  function dialogNotice(r) {
+    if (prefs.drop === "current") {
+      var box = el("div", "blocked");
+      var head = el("div", "head"); head.appendChild(el("span", null, "⚠")); head.appendChild(document.createTextNode("A hook blocked your prompt"));
+      var body = el("div", "body");
+      body.appendChild(el("span", "tag now", "current"));
+      body.appendChild(document.createTextNode("Prompt dropped by a hook: Held for review. Issues: " + r.issues.map(function (i) { return i.replace(/\.$/, ""); }).join("; ") + ". The improved prompt is in the prompt box: edit it or press Enter."));
+      box.appendChild(head); box.appendChild(body); transcript.appendChild(box); transcript.scrollTop = transcript.scrollHeight;
+    } else {
+      var line = addLine("msg-dim", "");
+      line.appendChild(el("span", "tag new", "proposed"));
+      line.appendChild(document.createTextNode("Held for review: " + r.issues.length + " issues. The improved prompt is in the prompt box; the list is in the band above it."));
+    }
+  }
+
+  /* ---------- Sending and the first-prompt model dialog ---------- */
+  function restate(text) {
+    var first = clean(text).text.split(/(?<=\.)\s/)[0].replace(/\.$/, "");
+    first = lcFirst(first); return first.length > 70 ? first.slice(0, 69) + "…" : first;
+  }
+
+  async function send() {
+    var text = draft.value;
+    if (!text.trim() || state.busy || !overlay.hidden) return;
+    var isCommand = text.trim().charAt(0) === "/";
+    if (!state.firstSent && !isCommand) {
+      var opts = ["Switch to sonnet", "Keep current model"];
+      if (state.offeredRefine) opts.push("Refine prompt");
+      var choice = await ask("Model", "Read as: " + restate(text) + ". This prompt looks moderate. Keep running it on Opus 5.5? If it runs here, effort will be at least medium.", opts);
+      if (choice === "Refine prompt") { refine("dialog"); return; }
+      if (choice === "Switch to sonnet") addLine("msg-dim", "Status line: prompt-triage: running sonnet, not Opus 5.5");
+    }
+    state.firstSent = true; state.result = null;
+    addLine("msg-user", text);
+    addLine("msg-dim", isCommand && /^\/goal\b/.test(text) ? "◎ /goal active (prototype: the goal loop would start here)" : "(prototype: the turn would start here)");
+    draft.value = ""; renderBand(); draft.focus();
+  }
+
+  /* ---------- Wiring ---------- */
+  draft.addEventListener("input", function () { if (!state.result) renderBand(); });
+  draft.addEventListener("keydown", function (ev) { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); send(); } });
+  $("send").addEventListener("click", send);
+  $("cfg-band").value = prefs.band; $("cfg-drop").value = prefs.drop;
+  $("cfg-band").addEventListener("change", function (e) { prefs.band = e.target.value; savePrefs(); renderBand(); });
+  $("cfg-drop").addEventListener("change", function (e) { prefs.drop = e.target.value; savePrefs(); });
+  $("reset").addEventListener("click", function () {
+    while (transcript.firstChild) transcript.removeChild(transcript.firstChild);
+    state = { firstSent: false, offeredRefine: true, busy: false, original: null, result: null, showIssues: false };
+    draft.value = SAMPLE; intro(); renderBand(); announce("Reset to the sample draft.");
+  });
+
+  function intro() {
+    addLine("msg-dim", "Session started. prompt-triage loaded. This is a mockup: the review is canned and nothing is sent to a model.");
+  }
+  draft.value = SAMPLE; intro(); renderBand();
+})();
+</script>
+</body>
+</html>
