@@ -288,8 +288,11 @@
       var box = $("dlg-opts"); while (box.firstChild) box.removeChild(box.firstChild);
       var input = $("dlg-other-input"); input.value = "";
       var lastFocus = document.activeElement;
+      // Everything but the dialog is inert while it is open, so focus and digit keys cannot reach the composer.
+      var outside = [].filter.call(overlay.parentNode.children, function (n) { return n !== overlay; }).concat([].slice.call(document.querySelectorAll("aside")));
+      function setInert(on) { outside.forEach(function (n) { n.inert = on; }); }
       function finish(v) {
-        overlay.hidden = true; document.removeEventListener("keydown", onKey); $("dlg-other").onsubmit = null; $("dlg-dismiss").onclick = null;
+        overlay.hidden = true; setInert(false); document.removeEventListener("keydown", onKey); $("dlg-other").onsubmit = null; $("dlg-dismiss").onclick = null;
         if (lastFocus && lastFocus.focus) lastFocus.focus(); resolve(v);
       }
       function onKey(ev) {
@@ -303,7 +306,7 @@
       $("dlg-other").onsubmit = function (ev) { ev.preventDefault(); var v = input.value.trim(); if (v) finish(v); };
       $("dlg-dismiss").onclick = function () { finish(null); };
       document.addEventListener("keydown", onKey);
-      overlay.hidden = false; box.firstChild.focus();
+      setInert(true); overlay.hidden = false; box.firstChild.focus();
     });
   }
 
@@ -410,9 +413,9 @@
     } else {
       var line = addLine("msg-dim", "");
       line.appendChild(el("span", "tag new", "proposed"));
-      var never = prefs.band === "never";
-      line.appendChild(document.createTextNode("Held for review: " + r.issues.length + " issues. The improved prompt is in the prompt box; the list is " + (never ? "in the notice below." : "in the band above it.")));
-      if (never) addLine("msg-dim", "System notice: " + r.issues.join(" "));
+      // The band may not be drawn (band: never, a survey, another mod's band), so the list always goes to a session notice too.
+      line.appendChild(document.createTextNode("Held for review: " + r.issues.length + " issues. The improved prompt is in the prompt box; the issues are listed below."));
+      addLine("msg-dim", "System notice: " + r.issues.join(" "));
     }
   }
 

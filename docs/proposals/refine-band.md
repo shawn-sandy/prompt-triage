@@ -66,9 +66,10 @@ The mod API has a render slot for exactly this. From the build 2.1.317 types:
   "under a dialog or headless", so the fill must happen after any question
   dialog closes. prompt-triage's `improve()` already does this in that order.
 - `prompt.edit` fires on each edit the user makes, and `prompt.change` on any
-  other change (a fill, a clear, a submit). Either can flip an "is there a
-  draft" atom so the band redraws only when the box goes from empty to
-  non-empty and back, not on every key.
+  other change (a fill, a clear, a submit). Either can recompute whether the
+  band should show (the draft is non-empty, is not a slash command, and meets
+  the `band` setting's length or line-break rule) and write that answer to an
+  atom, so the band redraws only when the answer changes, not on every key.
 - `$.store` keeps values across sessions, so the last-used picks can persist.
 
 What it cannot do, or what is unverified:
@@ -155,8 +156,10 @@ session. **Refine** has hotkey `r` once the band has focus.
 4. Ask up to three questions through `$.ui.ask`, as `/refine-prompt` does now.
 5. Read the draft again. If it no longer matches the saved original, the user
    kept typing during the review: leave the draft alone and show a toast
-   ("The draft changed during the review; press Refine again"). Otherwise put
-   the rewrite in the box with `$.prompt.fill()`.
+   ("The draft changed during the review; press Refine again"), then stop:
+   no result row, and the first prompt is not marked refined, so **Restore
+   original** cannot overwrite the new edits. Otherwise put the rewrite in the
+   box with `$.prompt.fill()`.
 6. Switch the band to a result row: the issue count, **Show issues** (expands
    the list inside the band, which scrolls past `maxRows`), **Restore
    original**, and **Done**. Restore fills the saved original back. This does
@@ -182,11 +185,13 @@ Proposed:
 
 - When `$.prompt.fill` answers `isFilled: true`, the reason is one line:
   "Held for review: N issues. The improved prompt is in the prompt box; the
-  list is in the band above it."
-- The issue list goes to the band's result row (step 6 above), with **Show
-  issues** and **Restore original**, the same as a band refine.
-- With `band` set to `never`, the list goes to a `$.session.append` notice of
-  type `system` instead.
+  issues are listed below."
+- The issue list always goes to a `$.session.append` notice of type `system`.
+  The band may not be drawn at that moment: `band` set to `never`, a survey
+  holding the band, or another mod's band hiding this one. The mod cannot tell
+  the last case apart, so the notice is the one place the list is sure to be.
+- Where the band does draw, it also switches to the result row (step 6 above),
+  with **Show issues** and **Restore original**, the same as a band refine.
 - When the fill answers `isFilled: false`, the reason keeps today's full text,
   rewrite included, since the drop reason is then the user's only copy of it.
 
@@ -205,14 +210,14 @@ behaves like today's review plus the always-on checks.
 
 These come from the current docs and apply to every refine:
 
-| Check                                                            | What the rewrite does                                                                                                                                                     | Source                                                                        |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Missing goal, scope, done-criteria, contradictions, placeholders | Today's reviewer behavior, unchanged                                                                                                                                      | Existing `REVIEWER`                                                           |
-| Tell Claude what it can't see                                    | Asks for facts not in the repo (a decision, a required env var, a preference between two approaches). Does not add file layout or conventions Claude can read itself.     | CC best practices: "Tell Claude what it can't see", "Write a specific prompt" |
-| Hand it over instead of describing it                            | Where the prompt names a file that exists, writes it as `@path` so its contents are included                                                                              | CC best practices; Common workflows: "Reference files and directories"        |
-| Drop advice current models no longer need                        | Removes `think hard` / `be thorough`, ALL CAPS and IMPORTANT emphasis, "keep going / don't be lazy / loop until done", and lists each removal as an issue with the reason | CC best practices: "What you can stop doing"                                  |
-| Keep the why                                                     | Keeps a reason the user gave for a constraint; never invents one                                                                                                          | Prompting best practices: "Add context to improve performance"                |
-| Rules that cannot bend                                           | Flags "never X / always Y" lines as an issue suggesting a hook or deny rule, without rewriting them                                                                       | CC best practices: "Deterministic and non-deterministic instructions"         |
+| Check                                                            | What the rewrite does                                                                                                                                                                                                                                                                | Source                                                                        |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| Missing goal, scope, done-criteria, contradictions, placeholders | Today's reviewer behavior, unchanged, except that Goal: Off drops the goal and done-criteria parts                                                                                                                                                                                   | Existing `REVIEWER`                                                           |
+| Tell Claude what it can't see                                    | Asks for facts not in the repo (a decision, a required env var, a preference between two approaches). Does not add file layout or conventions Claude can read itself.                                                                                                                | CC best practices: "Tell Claude what it can't see", "Write a specific prompt" |
+| Hand it over instead of describing it                            | Where the prompt names a path, the mod (not the model) adds the `@` prefix, and only to paths `$.fs.exists` confirms: the check `review()` already runs on named paths. A path that does not exist yet, such as a file to create, stays plain, and an existing `@` reference is kept | CC best practices; Common workflows: "Reference files and directories"        |
+| Drop advice current models no longer need                        | Removes `think hard` / `be thorough`, ALL CAPS and IMPORTANT emphasis, "keep going / don't be lazy / loop until done", and lists each removal as an issue with the reason                                                                                                            | CC best practices: "What you can stop doing"                                  |
+| Keep the why                                                     | Keeps a reason the user gave for a constraint; never invents one                                                                                                                                                                                                                     | Prompting best practices: "Add context to improve performance"                |
+| Rules that cannot bend                                           | Flags "never X / always Y" lines as an issue suggesting a hook or deny rule, without rewriting them                                                                                                                                                                                  | CC best practices: "Deterministic and non-deterministic instructions"         |
 
 ### Goal: how the prompt says what done is
 
@@ -221,7 +226,7 @@ These come from the current docs and apply to every refine:
 | Auto (default) | Flags a missing done-condition; asks for it if only the user knows it                                                                                                                                   | Existing reviewer                               |
 | Add a check    | Ends the prompt with what done looks like and a check Claude can run (a test file, a build's exit code, a linter, a screenshot next to the mockup), and asks for the command and its output as evidence | CC best practices: "Give Claude a check to run" |
 | As `/goal`     | Rewrites into `/goal <condition>`: one measurable end state, the stated check, constraints that must not change, an optional turn cap; at most 4,000 characters                                         | `/goal` docs: "Write an effective condition"    |
-| Off            | No goal checks                                                                                                                                                                                          |                                                 |
+| Off            | No goal or done-criteria checks. A Goal pick overrides the always-on row above                                                                                                                          |                                                 |
 
 `As /goal` puts a slash command in the box. prompt-triage skips rating slash
 commands, so sending it starts the goal directly, as `/goal` does.
@@ -293,19 +298,21 @@ rewrite should not change because a docs page changed overnight.
 Each item is a pass/fail check, run with `claude plugin test` using the kit's
 `mount` on `['terminal', 'desktop']`, then by hand in both surfaces:
 
-1. A band with three `Select`s and a `Button` draws and stays within one row in
-   the terminal at 80 columns, and lays out readably on the desktop surface.
+1. A band with all four `Select`s and a `Button` draws and stays within one row
+   in the terminal at 80 columns, and lays out readably on the desktop surface.
 2. `$.ui.ask` called from the button's `onPress` opens the question dialog.
 3. `$.prompt.fill` after that dialog closes answers `isFilled: true`.
-4. The draft atom flips on the first character and on clear, and not per key.
+4. The visibility atom changes when the draft becomes non-empty or empty,
+   crosses 40 characters, gains or loses a line break, or starts or stops
+   starting with `/`, and not on other keys.
 5. The band yields to a survey (`hasSurvey`) and to another mod's band.
 6. A `{ drop }` result can be shown without the "A hook blocked your prompt"
    heading, or with a neutral one.
 
 If 2 fails, the band skips questions and lists them as issues instead. If 1
-fails on desktop, the band shows only **Refine** and opens the pickers as one
-`$.ui.ask` multi-select. If 6 fails, keep the heading and ship the shorter
-reason line; the issue list still moves to the band.
+fails on either surface, the band shows only **Refine** and opens the pickers
+as one `$.ui.ask` multi-select. If 6 fails, keep the heading and ship the
+shorter reason line; the issue list still moves to the notice and the band.
 
 ## Phasing
 
