@@ -223,7 +223,7 @@
   function renderBand() {
     while (band.firstChild) band.removeChild(band.firstChild);
     hint.hidden = true;
-    if (state.result) { renderResult(); band.hidden = false; return; }
+    if (state.result && prefs.band !== "never") { renderResult(); band.hidden = false; return; }
     if (!bandVisible()) {
       band.hidden = true;
       if (prefs.band !== "never" && draft.value.trim() && draft.value.trim().charAt(0) !== "/") {
@@ -384,6 +384,13 @@
       answers[asked[i].id] = ans;
     }
     var r = review(text, prefs.picks, asked, answers);
+    if (draft.value !== text) {
+      // The draft changed during the review: filling would discard the new edits, so keep them and skip the rewrite.
+      state.busy = false; state.original = null; renderBand();
+      addLine("msg-dim", "Toast: the draft changed during the review, so the rewrite was not applied. Press Refine again.");
+      announce("The draft changed during the review, so the rewrite was not applied.");
+      return;
+    }
     draft.value = r.rewrite;
     state.busy = false; state.result = r; state.showIssues = false; state.offeredRefine = false;
     if (source === "dialog") dialogNotice(r);
@@ -403,7 +410,9 @@
     } else {
       var line = addLine("msg-dim", "");
       line.appendChild(el("span", "tag new", "proposed"));
-      line.appendChild(document.createTextNode("Held for review: " + r.issues.length + " issues. The improved prompt is in the prompt box; the list is in the band above it."));
+      var never = prefs.band === "never";
+      line.appendChild(document.createTextNode("Held for review: " + r.issues.length + " issues. The improved prompt is in the prompt box; the list is " + (never ? "in the notice below." : "in the band above it.")));
+      if (never) addLine("msg-dim", "System notice: " + r.issues.join(" "));
     }
   }
 

@@ -153,7 +153,10 @@ session. **Refine** has hotkey `r` once the band has focus.
 2. Save the original draft in an atom.
 3. Run `review()` with the draft and the selected options (see below).
 4. Ask up to three questions through `$.ui.ask`, as `/refine-prompt` does now.
-5. Put the rewrite in the box with `$.prompt.fill()`.
+5. Read the draft again. If it no longer matches the saved original, the user
+   kept typing during the review: leave the draft alone and show a toast
+   ("The draft changed during the review; press Refine again"). Otherwise put
+   the rewrite in the box with `$.prompt.fill()`.
 6. Switch the band to a result row: the issue count, **Show issues** (expands
    the list inside the band, which scrolls past `maxRows`), **Restore
    original**, and **Done**. Restore fills the saved original back. This does
