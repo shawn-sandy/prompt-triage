@@ -341,7 +341,7 @@
   function review(text, p, asked, answers) {
     var c = clean(text), issues = c.removed.slice(), body = c.text, tail = [];
     var a = function (id) { return answers[id]; };
-    if (a("version")) body += " Use " + lcFirst(a("version")).replace(/^the /, "the ") + ".";
+    if (a("version")) body += " Use " + lcFirst(a("version")) + ".";
     else if (/release/i.test(text)) issues.push("The current version is never stated, or where it is recorded.");
     if (/release/i.test(text)) issues.push("It does not say what to do if GitHub releases already exist.");
     if (a("keep") && a("keep") !== "Nothing in particular") body += " Leave " + lcFirst(a("keep")) + " unchanged.";
