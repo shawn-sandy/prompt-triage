@@ -39,10 +39,11 @@ desktop app it can also hand a complex or long-running task to a new session.
 6. When the dialog is shown for a `moderate`, `complex` or `long-running`
    prompt, it opens
    with a one-line restatement of what the prompt asks for, such as
-   `Read as: add a retry limit to the upload client`, from one `haiku` call.
+   `Read as: add a retry limit to the upload client`, from the same `haiku`
+   call that rated it.
    The restatement is told to add no goal or reason you did not state, so a
    misread shows before the work starts; choose **Refine prompt** to fix it.
-   If the call fails, the dialog is shown without it.
+   If the reply has no restatement, the dialog is shown without it.
 7. When the suggestion matches your current model, nothing is asked, except
    that in the desktop app a `complex` or `long-running` prompt still offers
    the new session. Dismissing the dialog, or a failed rating (an error, a
@@ -169,17 +170,18 @@ add the marketplace `shawn-sandy/prompt-triage`.
 ## Cost
 
 One `haiku` request at effort `low`, with its reply capped at 256 tokens, on
-the first prompt of each session. Later prompts are not checked. When the
-dialog is shown for a `moderate`, `complex` or `long-running` prompt, one
-`haiku` request restates it. Each **Refine prompt** or `/refine-prompt` adds one `haiku`
-request, and a second when you answer its questions.
+the first prompt of each session. Later prompts are not checked. The same
+request returns the rating and, for a `moderate`, `complex` or `long-running`
+prompt, the one-line restatement, so the dialog never waits on a second call.
+A `simple` prompt gets the label only. Each **Refine prompt** or
+`/refine-prompt` adds one `haiku` request, and a second when you answer its
+questions.
 
 ## Limits
 
 - The first prompt waits up to 10 seconds for the rating and, when a question
-  is shown, for your answer before it is sent. A `moderate`, `complex` or
-  `long-running` prompt also waits up to 10 seconds for its restatement before
-  the dialog appears.
+  is shown, for your answer before it is sent. The restatement comes in the
+  same call, so it adds no wait.
 - Free text under "Other" switches the model if it names exactly one of
   `haiku`, `sonnet`, `opus` or `fable`, so `keep opus` switches to opus. Text naming
   two, such as `not haiku, use opus`, switches nothing, and so does text with
@@ -210,9 +212,8 @@ request, and a second when you answer its questions.
 ## Data
 
 The text of your first prompt is sent once per session to `haiku` through
-`$.model.complete`, to get the rating. When the dialog is shown for a
-`moderate`, `complex` or `long-running` prompt, it is also sent to `haiku` through
-`$.model.complete` for the one-line restatement. When you choose
+`$.model.complete`, to get the rating and, for a `moderate`, `complex` or `long-running` prompt,
+the one-line restatement. When you choose
 **Refine prompt** or run `/refine-prompt`, that prompt is also sent to `haiku`
 through `$.model.complete` for the review, and sent again with your answers
 when you answer its questions. The path check reads only whether
