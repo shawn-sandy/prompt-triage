@@ -90,7 +90,8 @@ What it cannot do, or what is unverified:
 Already shipped. It runs after Enter, on the first prompt only, and each
 question is one dialog with 2 to 4 options. Adding four option pickers there
 would mean four extra dialogs before every refine. Keep the dialog's
-**Refine prompt** option as it is, and have it use the band's stored picks.
+**Refine prompt** option, have it use the band's stored picks, and shorten the
+message it leaves (see [Dialog path](#dialog-path)).
 
 ### C. Slash command or skill
 
@@ -164,6 +165,32 @@ session. **Refine** has hotkey `r` once the band has focus.
 
 If the review fails or times out, show a `$.ui.toast` ("Review failed; the
 prompt was not changed") and leave the draft alone.
+
+### Dialog path
+
+Picking **Refine prompt** in the model dialog happens after Enter, so the
+`prompt.submit` hook has to stop the send with `{ drop: reason }`. The app
+draws that reason under its own "A hook blocked your prompt" heading. Today the
+reason is the whole review joined into one sentence by `asLine`, because the
+app draws it on a single row. That reads as an error, and a long issue list
+does not fit the row.
+
+Proposed:
+
+- When `$.prompt.fill` answers `isFilled: true`, the reason is one line:
+  "Held for review: N issues. The improved prompt is in the prompt box; the
+  list is in the band above it."
+- The issue list goes to the band's result row (step 6 above), with **Show
+  issues** and **Restore original**, the same as a band refine.
+- With `band` set to `never`, the list goes to a `$.session.append` notice of
+  type `system` instead.
+- When the fill answers `isFilled: false`, the reason keeps today's full text,
+  rewrite included, since the drop reason is then the user's only copy of it.
+
+The mod controls only the reason text. The heading and its styling belong to
+the app, so the shorter line may still sit under "A hook blocked your prompt".
+The prototype's proposed style hides that heading, which is the best case, not
+a promise; spike check 6 settles it.
 
 ## Refinement options
 
@@ -269,10 +296,13 @@ Each item is a pass/fail check, run with `claude plugin test` using the kit's
 3. `$.prompt.fill` after that dialog closes answers `isFilled: true`.
 4. The draft atom flips on the first character and on clear, and not per key.
 5. The band yields to a survey (`hasSurvey`) and to another mod's band.
+6. A `{ drop }` result can be shown without the "A hook blocked your prompt"
+   heading, or with a neutral one.
 
 If 2 fails, the band skips questions and lists them as issues instead. If 1
 fails on desktop, the band shows only **Refine** and opens the pickers as one
-`$.ui.ask` multi-select.
+`$.ui.ask` multi-select. If 6 fails, keep the heading and ship the shorter
+reason line; the issue list still moves to the band.
 
 ## Phasing
 
