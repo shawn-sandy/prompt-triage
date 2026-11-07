@@ -24,7 +24,15 @@ const LOG = 'decisions'
 const LOG_CAP = 200
 /** One logged decision: the rating, the main-loop model before and after, and the option chosen. */
 type Decision = { rating: Rating; from: string; to: string; chose: string }
-const KEEP = 'Keep current model'
+/** What each rating says it would take, said in the dialog beside the rating so the suggestion is read with its reason. */
+const SIZE: Record<Rating, string> = {
+  simple: 'haiku or low effort would do',
+  moderate: 'a sonnet-sized task',
+  complex: 'an opus-sized task',
+  'long-running': 'a fable-sized job',
+}
+/** The dialog's keep option names the model it keeps, so the choice reads without translating "current". */
+const keep = (model: string) => `Keep ${model}`
 const LOW_EFFORT = 'Keep model, effort low'
 const NEW_SESSION = 'Open in a new session'
 const REFINE = 'Refine prompt'
@@ -320,7 +328,7 @@ function tally(list: Decision[]): string {
  * when it named one. The text itself is never stored: it can carry anything the person typed.
  */
 function chosen(answer: string): string {
-  if ([KEEP, LOW_EFFORT, NEW_SESSION, REFINE].includes(answer) || /^Switch to (?:haiku|sonnet|opus|fable)$/.test(answer)) return answer
+  if ([LOW_EFFORT, NEW_SESSION, REFINE].includes(answer) || /^(?:Switch to (?:haiku|sonnet|opus|fable)|Keep \S+)$/.test(answer)) return answer
   const picked = pickedModel(answer)
   return picked ? `other: ${picked}` : 'other'
 }
@@ -365,15 +373,16 @@ async function choose(
   // haiku the switch is the far stronger lever, so there it leads.
   const lower = rating === 'simple' && !fits ? [LOW_EFFORT] : []
   const far = have !== undefined && have - RANK[suggested]! >= 2
-  const options = [...(far ? [...switches, ...lower] : [...lower, ...switches]), KEEP, ...(canHandOff ? [NEW_SESSION] : [])]
+  const options = [...(far ? [...switches, ...lower] : [...lower, ...switches]), keep(current), ...(canHandOff ? [NEW_SESSION] : [])]
   if (options.length < 2) return { rating, current }
 
-  const floor = FLOOR[rating] ? ` If it runs here, effort will be at least ${FLOOR[rating]}.` : ''
+  // The floor is said only where it can change anything: every model's default effort is already at or above medium.
+  const floor = FLOOR[rating] === 'high' ? ' Effort will be at least high.' : ''
   // The rating call already returned the reading; a simple prompt is cheap to misread, so it gets none.
   const readAs = rating === 'simple' ? undefined : reading
   // Offered only where the dialog shows anyway, so it adds no question; /refine-prompt covers the rest.
   const answer = await $.ui
-    .ask(`${readAs ? `Read as: ${readAs}. ` : ''}This prompt looks ${rating}. Keep running it on ${current}?${floor}`, {
+    .ask(`${readAs ? `Read as: ${readAs}. ` : ''}Rated ${rating}: ${SIZE[rating]}. You are on ${current}.${floor} Run it how?`, {
       header: 'Model',
       options: canImprove ? [...options, REFINE] : options,
     })
@@ -423,7 +432,8 @@ export const register: Register = (on, options) => {
     effort = exact ? 'low' : FLOOR[rating]
     let status = raised
     raised = false
-    const picked = pickedModel(answer)
+    // The keep label names the session's model, so it is never read as free text naming one to switch to.
+    const picked = answer === keep(current) ? undefined : pickedModel(answer)
     if (picked) {
       model = picked
       // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.

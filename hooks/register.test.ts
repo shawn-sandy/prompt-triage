@@ -175,7 +175,7 @@ test('a complex first prompt offers opus, and picking it routes main-loop reques
   const seen = engine(on, { answer: 'Switch to opus' })
 
   await submit($, 'Redesign the auth layer across three services')
-  expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Switch to opus', 'Keep claude-sonnet-5-5', 'Refine prompt']])
   expect(seen.status).toEqual(['running opus, not claude-sonnet-5-5'])
 
   await step($)
@@ -184,7 +184,7 @@ test('a complex first prompt offers opus, and picking it routes main-loop reques
 })
 
 test('keeping the current model leaves requests alone', async ($, on) => {
-  const seen = engine(on, { answer: 'Keep current model' })
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
   await step($)
@@ -236,7 +236,7 @@ test('a later prompt in the session is not checked', async ($, on) => {
 })
 
 test('nothing is asked when the rating matches the current model', async ($, on) => {
-  const seen = engine(on, { rating: 'moderate', model: 'claude-sonnet-5-5', answer: 'Keep current model' })
+  const seen = engine(on, { rating: 'moderate', model: 'claude-sonnet-5-5', answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Rename this function')
   expect(seen.ratings.length).toBe(1)
@@ -255,7 +255,7 @@ test('in the desktop app a complex prompt can be handed to a new session', async
 })
 
 test('the terminal is not offered a new session', async ($, on) => {
-  const seen = engine(on, { surfaces: ['terminal'], answer: 'Keep current model' })
+  const seen = engine(on, { surfaces: ['terminal'], answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
   expect(seen.asked[0]).not.toContain('Open in a new session')
@@ -297,7 +297,7 @@ test('the improved prompt is rated again when sent, without offering another imp
 
   await submit($, 'Redesign the auth layer')
   await submit($, seen.filled[0]!)
-  expect(seen.asked[1]).toEqual(['Switch to opus', 'Keep current model'])
+  expect(seen.asked[1]).toEqual(['Switch to opus', 'Keep claude-sonnet-5-5'])
   expect(seen.submitted[0]?.text).toBe('Redesign auth in api, web and admin; done when tests pass.')
 })
 
@@ -450,7 +450,7 @@ test('/refine-prompt asks at most three questions', async ($, on) => {
 })
 
 test('a complex prompt raises main-loop effort below high, and leaves the rest alone', async ($, on) => {
-  const seen = engine(on, { answer: 'Keep current model' })
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
   await step($, undefined, 'low')
@@ -472,7 +472,7 @@ test('a moderate prompt raises effort to medium even when nothing is asked', asy
 })
 
 test('a simple prompt leaves effort alone', async ($, on) => {
-  const seen = engine(on, { rating: 'simple', answer: 'Keep current model' })
+  const seen = engine(on, { rating: 'simple', answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Fix a typo')
   await step($, undefined, 'low')
@@ -499,7 +499,7 @@ test("the person's own /effort ends the effort minimum but keeps the model overr
 })
 
 test('a prompt rated again replaces the effort minimum and its status', async ($, on) => {
-  const s: Setup = { answer: 'Keep current model' }
+  const s: Setup = { answer: 'Keep claude-sonnet-5-5' }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -522,42 +522,42 @@ test("/model after a raise keeps the effort part of the status line", async ($, 
 })
 
 test('a complex prompt makes exactly one model.complete call before the dialog, rating and restating together', async ($, on) => {
-  const seen = engine(on, { answer: 'Keep current model', restate: 'Redesign auth across three services.' })
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5', restate: 'Redesign auth across three services.' })
 
   await submit($, 'Redesign the auth layer across three services')
   expect(seen.completesAtAsk).toEqual([1])
   expect(seen.ratings.length).toBe(1)
   expect(seen.reviews.length).toBe(0)
-  expect(seen.questions[0]).toMatch(/^Read as: Redesign auth across three services\. This prompt looks complex/)
+  expect(seen.questions[0]).toMatch(/^Read as: Redesign auth across three services\. Rated complex/)
 })
 
 test('only the restatement\'s first line is shown, and a long one is cut', async ($, on) => {
-  const seen = engine(on, { answer: 'Keep current model', restate: `${'word '.repeat(40)}\nA second line.` })
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5', restate: `${'word '.repeat(40)}\nA second line.` })
 
   await submit($, 'Redesign the auth layer')
   expect(seen.questions[0]).not.toContain('A second line')
   expect(seen.questions[0]).toContain('…')
-  expect(seen.questions[0]!.indexOf('This prompt looks')).toBeLessThan(140)
+  expect(seen.questions[0]!.indexOf('Rated complex')).toBeLessThan(140)
 })
 
 test('a restatement that uses a rating word does not change the rating', async ($, on) => {
-  const seen = engine(on, { rating: 'moderate', model: 'claude-opus-5-5', answer: 'Keep current model', restate: 'Untangle the complex retry logic.' })
+  const seen = engine(on, { rating: 'moderate', model: 'claude-opus-5-5', answer: 'Keep claude-opus-5-5', restate: 'Untangle the complex retry logic.' })
 
   await submit($, 'Untangle the retry logic')
-  expect(seen.questions[0]).toContain('This prompt looks moderate')
+  expect(seen.questions[0]).toContain('Rated moderate')
 })
 
 test('a rating reply with no restatement still shows the dialog without one', async ($, on) => {
-  const seen = engine(on, { answer: 'Keep current model' })
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
   await submit($, 'Redesign the auth layer')
   expect(seen.completesAtAsk).toEqual([1])
-  expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Refine prompt']])
-  expect(seen.questions[0]).toMatch(/^This prompt looks complex/)
+  expect(seen.asked).toEqual([['Switch to opus', 'Keep claude-sonnet-5-5', 'Refine prompt']])
+  expect(seen.questions[0]).toMatch(/^Rated complex/)
   expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
 })
 
 test('a simple prompt shows no restatement even if the reply carries one', async ($, on) => {
-  const simple = engine(on, { rating: 'simple', answer: 'Keep current model', restate: 'Fix a typo.' })
+  const simple = engine(on, { rating: 'simple', answer: 'Keep claude-sonnet-5-5', restate: 'Fix a typo.' })
   await submit($, 'Fix a typo')
   expect(simple.asked.length).toBe(1)
   expect(simple.completesAtAsk).toEqual([1])
@@ -572,7 +572,7 @@ test('a prompt that needs no dialog makes the one call and shows nothing', async
 })
 
 test('the rating call asks for the restatement only on a second line, and not for simple prompts', async ($, on) => {
-  const seen = engine(on, { answer: 'Keep current model' })
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
   const system = seen.ratings[0]!.system!
@@ -582,7 +582,7 @@ test('the rating call asks for the restatement only on a second line, and not fo
 })
 
 test('the first prompt is rated by one low-effort haiku call against a four-label rubric', async ($, on) => {
-  const seen = engine(on, { answer: 'Keep current model' })
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
   expect(seen.classified()).toBe(0)
@@ -594,7 +594,7 @@ test('the first prompt is rated by one low-effort haiku call against a four-labe
 })
 
 test('a rating reply that names a label among other words is taken', async ($, on) => {
-  const seen = engine(on, { rating: 'Rating: moderate.', model: 'claude-opus-5-5', answer: 'Keep current model' })
+  const seen = engine(on, { rating: 'Rating: moderate.', model: 'claude-opus-5-5', answer: 'Keep claude-opus-5-5' })
 
   await submit($, 'Add a flag to the CLI')
   expect(seen.asked[0]).toContain('Switch to sonnet')
@@ -615,7 +615,7 @@ for (const [how, rating] of [['names no label', 'unsure'], ['names two labels', 
 
 for (const model of ['claude-mythos-5-1', 'Default (recommended)']) {
   test(`a complex prompt on ${model} is not offered opus`, async ($, on) => {
-    const seen = engine(on, { model, surfaces: ['desktop'], answer: 'Keep current model' })
+    const seen = engine(on, { model, surfaces: ['desktop'], answer: `Keep ${model}` })
 
     await submit($, 'Redesign the auth layer')
     expect(seen.asked.flat()).not.toContain('Switch to opus')
@@ -638,8 +638,8 @@ test('a long-running prompt on opus offers fable, and a new session in the deskt
   const seen = engine(on, { rating: 'long-running', model: 'claude-opus-5-5', surfaces: ['desktop'], answer: 'Switch to fable' })
 
   await submit($, 'Migrate the whole codebase from Express to Fastify')
-  expect(seen.asked).toEqual([['Switch to fable', 'Keep current model', 'Open in a new session', 'Refine prompt']])
-  expect(seen.questions[0]).toContain('looks long-running')
+  expect(seen.asked).toEqual([['Switch to fable', 'Keep claude-opus-5-5', 'Open in a new session', 'Refine prompt']])
+  expect(seen.questions[0]).toContain('Rated long-running')
   await step($, undefined, 'medium')
   expect(seen.steps[0]?.model).toBe('fable')
 })
@@ -648,16 +648,16 @@ test('a long-running prompt on sonnet offers opus as a step down from fable', as
   const seen = engine(on, { rating: 'long-running', model: 'claude-sonnet-5-5', answer: 'Switch to opus' })
 
   await submit($, 'Migrate the whole codebase from Express to Fastify')
-  expect(seen.asked).toEqual([['Switch to fable', 'Switch to opus', 'Keep current model', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Switch to fable', 'Switch to opus', 'Keep claude-sonnet-5-5', 'Refine prompt']])
   await step($, undefined, 'medium')
   expect(seen.steps[0]?.model).toBe('opus')
 })
 
 test('a complex prompt on sonnet offers no step down, since opus is already the suggestion', async ($, on) => {
-  const seen = engine(on, { rating: 'complex', model: 'claude-sonnet-5-5', answer: 'Keep current model' })
+  const seen = engine(on, { rating: 'complex', model: 'claude-sonnet-5-5', answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
-  expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Switch to opus', 'Keep claude-sonnet-5-5', 'Refine prompt']])
 })
 
 for (const model of ['claude-fable-5-1', 'claude-mythos-5-1']) {
@@ -672,7 +672,7 @@ for (const model of ['claude-fable-5-1', 'claude-mythos-5-1']) {
 }
 
 test('a long-running prompt raises main-loop effort to high', async ($, on) => {
-  const seen = engine(on, { rating: 'long-running', model: 'claude-opus-5-5', answer: 'Keep current model' })
+  const seen = engine(on, { rating: 'long-running', model: 'claude-opus-5-5', answer: 'Keep claude-opus-5-5' })
 
   await submit($, 'Migrate the whole codebase from Express to Fastify')
   await step($, undefined, 'medium')
@@ -681,10 +681,10 @@ test('a long-running prompt raises main-loop effort to high', async ($, on) => {
 })
 
 test('a simple prompt offers to keep the model at low effort first', async ($, on) => {
-  const seen = engine(on, { rating: 'simple', answer: 'Keep current model' })
+  const seen = engine(on, { rating: 'simple', answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'What does git rebase --onto do?')
-  expect(seen.asked).toEqual([['Keep model, effort low', 'Switch to haiku', 'Keep current model', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Keep model, effort low', 'Switch to haiku', 'Keep claude-sonnet-5-5', 'Refine prompt']])
 })
 
 test('keeping the model at low effort lowers main-loop requests to low and leaves subagents alone', async ($, on) => {
@@ -993,7 +993,7 @@ test('a band refine marks the first prompt refined, so the model dialog does not
   const seen = engine(on, { draft: LONG, review: REVIEWED })
   await refine(await band($))
   await submit($, seen.filled[0]!)
-  expect(seen.asked[0]).toEqual(['Switch to opus', 'Keep current model'])
+  expect(seen.asked[0]).toEqual(['Switch to opus', 'Keep claude-sonnet-5-5'])
 })
 
 test('the result row outlasts a short draft until the prompt is sent', async ($, on) => {
@@ -1250,15 +1250,48 @@ test('/triage-stats with nothing logged says so', async ($, on) => {
 })
 
 test('a simple prompt two tiers above haiku lists the switch before the low-effort option', async ($, on) => {
-  const seen = engine(on, { rating: 'simple', model: 'claude-opus-5-5', answer: 'Keep current model' })
+  const seen = engine(on, { rating: 'simple', model: 'claude-opus-5-5', answer: 'Keep claude-opus-5-5' })
 
   await submit($, 'What does git rebase --onto do?')
-  expect(seen.asked).toEqual([['Switch to haiku', 'Keep model, effort low', 'Keep current model', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Switch to haiku', 'Keep model, effort low', 'Keep claude-opus-5-5', 'Refine prompt']])
 })
 
 test('a simple prompt one tier above haiku keeps the low-effort option first', async ($, on) => {
-  const seen = engine(on, { rating: 'simple', model: 'claude-sonnet-5-5', answer: 'Keep current model' })
+  const seen = engine(on, { rating: 'simple', model: 'claude-sonnet-5-5', answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'What does git rebase --onto do?')
-  expect(seen.asked).toEqual([['Keep model, effort low', 'Switch to haiku', 'Keep current model', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Keep model, effort low', 'Switch to haiku', 'Keep claude-sonnet-5-5', 'Refine prompt']])
+})
+
+// --- The dialog's wording: the rating and what it suggests, the model you are on, then the choice ---
+
+test('a moderate prompt on opus says what the rating suggests and names the model, with no effort sentence', async ($, on) => {
+  const seen = engine(on, { rating: 'moderate', model: 'claude-opus-5-5', restate: 'add a retry limit to the upload client', answer: 'Keep claude-opus-5-5' })
+
+  await submit($, 'Add a retry limit to the upload client')
+  expect(seen.questions[0]).toBe('Read as: add a retry limit to the upload client. Rated moderate: a sonnet-sized task. You are on claude-opus-5-5. Run it how?')
+  expect(seen.asked[0]).toEqual(['Switch to sonnet', 'Keep claude-opus-5-5', 'Refine prompt'])
+})
+
+test('a complex prompt states the high effort floor in one sentence, with no "if it runs here"', async ($, on) => {
+  const seen = engine(on, { rating: 'complex', model: 'claude-sonnet-5-5', restate: 'redesign auth', answer: 'Keep claude-sonnet-5-5' })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.questions[0]).toBe('Read as: redesign auth. Rated complex: an opus-sized task. You are on claude-sonnet-5-5. Effort will be at least high. Run it how?')
+})
+
+test('a simple prompt names both cheaper levers and no effort floor', async ($, on) => {
+  const seen = engine(on, { rating: 'simple', model: 'claude-sonnet-5-5', answer: 'Keep claude-sonnet-5-5' })
+
+  await submit($, 'What does git rebase --onto do?')
+  expect(seen.questions[0]).toBe('Rated simple: haiku or low effort would do. You are on claude-sonnet-5-5. Run it how?')
+})
+
+test('keeping the named model switches nothing and is logged by its label', async ($, on) => {
+  const seen = engine(on, { model: 'claude-opus-5-5', rating: 'moderate', answer: 'Keep claude-opus-5-5' })
+
+  await submit($, 'Rename this function')
+  await step($)
+  expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
+  expect((seen.store.decisions as Decision[])[0]?.chose).toBe('Keep claude-opus-5-5')
 })

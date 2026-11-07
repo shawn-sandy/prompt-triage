@@ -21,9 +21,12 @@ desktop app it can also hand a complex or long-running task to a new session.
      codebase-wide migration or a port to another framework.
 2. Each rating suggests a model: simple to `haiku`, moderate to `sonnet`,
    complex to `opus`, long-running to `fable`. When the suggestion differs
-   from the model you are on, a dialog asks whether to switch or keep the
-   current model. Under "Other" you can type a model name, such as
-   `use sonnet` or `use fable`.
+   from the model you are on, a dialog says the rating and what it would
+   take, names the model you are on, and asks how to run it, for example
+   `Rated moderate: a sonnet-sized task. You are on claude-opus-5-5. Run it
+   how?` with **Switch to sonnet**, **Keep claude-opus-5-5** and **Refine
+   prompt**. Under "Other" you can type a model name, such as `use sonnet`
+   or `use fable`.
 
    A `long-running` rating also offers **Switch to opus** under the `fable`
    suggestion, whenever opus is itself a step up from your current model.
@@ -87,9 +90,11 @@ both. Running `/model` yourself ends the override.
 
 After the first prompt is rated `moderate`, `complex` or `long-running`, any
 main-loop request whose effort is below the minimum is sent at the minimum
-instead. Effort that is already at or above it is left alone. The dialog, when
-shown, says what the minimum is if the prompt runs in this session; it applies
-whichever model you choose, and also when no dialog is shown.
+instead. Effort that is already at or above it is left alone. The dialog for
+a `complex` or `long-running` prompt says `Effort will be at least high`; the
+`medium` minimum is not mentioned, since no model's default effort is below
+it. The minimum applies whichever model you choose, and also when no dialog
+is shown.
 
 The minimums guard against an effort lowered by hand. At the Claude API's
 default effort (`high` on Fable 5.1 and Sonnet 5.5, `medium` on Opus 5.5 and
