@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { ModelCompleteInput, On, PromptSubmitInput, RenderSurface, TurnStepInput } from 'claude-code'
+import type { ModelCompleteInput, On, PromptSubmitInput, RenderElement, RenderSurface, TurnStepInput } from 'claude-code'
 
 type Setup = {
   turns?: number
@@ -42,6 +42,7 @@ function engine(on: On, s: Setup) {
   const submitted: PromptSubmitInput[] = []
   const steps: TurnStepInput[] = []
   const status: (string | undefined)[] = []
+  const toasts: string[] = []
   const filled: string[] = []
   const reviewed: string[] = []
   const reviews: ModelCompleteInput[] = []
@@ -67,6 +68,15 @@ function engine(on: On, s: Setup) {
   })
   on('ui.status', (_$, e) => {
     status.push(e.text)
+    return { value: undefined }
+  })
+  // The engine's own band beneath the plugin: empty, as when no survey or other mod draws there.
+  on('ui.render', { component: 'AbovePrompt' }, $ => {
+    const { Box } = $.ui.resolve({ surface: 'terminal', component: 'AbovePrompt' })
+    return h(Box, null) as RenderElement
+  })
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
     return { value: undefined }
   })
   on('prompt.submit', (_$, e) => {
@@ -106,7 +116,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { asked, questions, submitted, steps, status, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
+  return { asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -664,4 +674,60 @@ test('the refine review gets a reply cap of at least 4096 tokens that grows with
   const [short, long] = seen.reviews.map(r => r.maxTokens ?? 0)
   expect(short).toBeGreaterThanOrEqual(4096)
   expect(long).toBeGreaterThan(short!)
+})
+
+/** The refine band's props as the engine draws it above an idle prompt. */
+const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} }
+
+/** Draws the refine band on `surface` and sets its Run in pick to New session. */
+async function armHandOff($: Engine, surface: 'desktop' | 'terminal' = 'desktop') {
+  const band = await $.ui.mount({ plugin: 'prompt-triage', surface, component: 'AbovePrompt', props: BAND })
+  await band.select({ key: 'run-in', value: 'new' })
+  return band
+}
+
+const handsOff = (e?: PromptSubmitInput) => e?.context?.some(c => c.includes('start_session')) ?? false
+
+test('Run in: New session hands the next prompt to a new session without the model dialog', async ($, on) => {
+  const seen = engine(on, { surfaces: ['desktop'] })
+
+  await armHandOff($)
+  await submit($, 'Redesign the auth layer')
+  expect(handsOff(seen.submitted[0])).toBe(true)
+  expect(seen.asked).toEqual([])
+  expect(seen.ratings).toEqual([])
+})
+
+test('Run in is one-shot: the band reads This session after an armed send, and the next prompt stays here', async ($, on) => {
+  const seen = engine(on, { surfaces: ['desktop'], turns: 1 })
+
+  const band = await armHandOff($)
+  await submit($, 'Redesign the auth layer')
+  expect((await band.find({ key: 'run-in' }))?.props.value).toBe('here')
+  await submit($, 'Now add tests')
+  expect(handsOff(seen.submitted[0])).toBe(true)
+  expect(handsOff(seen.submitted[1])).toBe(false)
+})
+
+test('Run in hands off a later prompt in the session, not only the first', async ($, on) => {
+  const seen = engine(on, { surfaces: ['desktop'], turns: 3 })
+
+  await armHandOff($)
+  await submit($, 'Port the billing module')
+  expect(handsOff(seen.submitted[0])).toBe(true)
+})
+
+test('the terminal band has no Run in, and an armed pick with no desktop attached sends here with a toast', async ($, on) => {
+  const s: { surfaces: RenderSurface[]; turns: number } = { surfaces: ['terminal'], turns: 1 }
+  const seen = engine(on, s)
+
+  const terminal = await $.ui.mount({ plugin: 'prompt-triage', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  expect(await terminal.find({ key: 'run-in' })).toBeUndefined()
+
+  s.surfaces = ['desktop']
+  await armHandOff($)
+  s.surfaces = ['terminal']
+  await submit($, 'Redesign the auth layer')
+  expect(handsOff(seen.submitted[0])).toBe(false)
+  expect(seen.toasts.length).toBe(1)
 })

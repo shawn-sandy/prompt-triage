@@ -33,6 +33,15 @@ desktop app it can also hand a complex or long-running task to a new session.
    start a fresh session with `start_session` instead of doing the task in
    this one. The mod cannot start the session itself, so it depends on Claude
    following that instruction.
+
+   For any prompt, not only the first, the desktop app also draws a **Run in**
+   picker in the band above the prompt input. Set it to **New session** and
+   press Enter: the prompt is sent with the same instruction, with no rating
+   and no model dialog, since the new session rates its own first prompt. The
+   pick applies to that one send, then reads **This session** again. If the
+   desktop app has detached by the time you send, the prompt runs in this
+   session and a toast says why. The terminal draws no Run in picker.
+
 5. Whenever the dialog is shown, it also offers **Refine prompt** (see
    below). Neither it nor **Keep model, effort low** adds a dialog where none
    would be shown.
@@ -128,7 +137,7 @@ command `/improve`; that name no longer runs.
 
 ## Hooks
 
-The mod registers six hooks in `hooks/register.ts`. `prompt.submit` and
+The mod registers seven hooks in `hooks/register.ts`. `prompt.submit` and
 `command.run` are also the names of calls, so these hooks run whenever a
 prompt is submitted or `/model`, `/effort` or `/refine-prompt` is run, whether you do it or
 other code (the app, another mod) does. The mod never makes either call
@@ -137,7 +146,8 @@ itself.
 | Hook | When it acts | What it may change |
 | --- | --- | --- |
 | `session.start` | Each session start. | Registers the `/refine-prompt` command. |
-| `prompt.submit` | Only on the first prompt of a fresh session that is not a slash command, a meta prompt or part of a running turn. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
+| `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, on the desktop surface, unless a survey holds the band. | Draws the **Run in** picker above whatever else draws the band. Changes nothing until you send. |
+| `prompt.submit` | On any prompt that is not a slash command, a meta prompt or part of a running turn while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
@@ -253,7 +263,7 @@ node scripts/eval-rating.mjs --baseline
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the six hooks and the `/refine-prompt` command. |
+| `hooks/register.ts` | All of the mod's logic: the seven hooks and the `/refine-prompt` command. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
 | `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`. |
