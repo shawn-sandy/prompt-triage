@@ -336,7 +336,9 @@ the minor number if a pushed commit subject starts with `feat:` or
 `feat(scope):`, and the patch number otherwise. It commits the new version and
 publishes a GitHub release tagged `prompt-triage--v<version>`.
 
-Two other workflows run on GitHub: `claude.yml` responds when `@claude` is
+Three other workflows run on GitHub: `check.yml` runs `claude plugin validate .`
+and `claude plugin test .` on every pull request, and `bump-version` runs it
+first and releases only if it passes; `claude.yml` responds when `@claude` is
 mentioned in an issue or pull request, and `claude-code-review.yml` reviews
 pull requests.
 
