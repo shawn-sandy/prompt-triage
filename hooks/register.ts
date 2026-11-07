@@ -79,8 +79,8 @@ const PICKERS = {
 type Picker = keyof typeof PICKERS
 type Picks = { [K in Picker]: keyof (typeof PICKERS)[K]['options'] & string }
 // A band row: a cell between controls, wrapping to a second row where the band is too narrow for every pick's label.
-// The step name in rowGap keeps a wrapped line off the buttons above it: the desktop draws a step as 8px (its gap-sm token), where a bare
-// 0 left Run in flush against them; the terminal draws a step as 0 rows down, so its band stays as tall as before.
+// rowGap is a step name, so each surface sizes it: the desktop's gap-sm token (0.5rem, 0.75rem in comfortable density), where with no gap a
+// wrapped Run in line sat against the buttons above it (as reported); the mod API types draw a step as 0 rows down on the terminal.
 const ROW = { columnGap: 1, rowGap: 'sm', flexWrap: 'wrap' } as const
 const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
 

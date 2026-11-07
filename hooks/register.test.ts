@@ -1070,7 +1070,10 @@ for (const surface of SURFACES) {
       const wrapping = (await ui.findAll({ type: 'Box' })).filter(box => box.props.flexWrap === 'wrap')
       // At least one wrapping row is drawn in each stage, so the loop below cannot pass by finding none.
       expect(wrapping.length).toBeGreaterThan(0)
-      for (const box of wrapping) if (!box.props.rowGap) ungapped.push(`${stage} ${String(box.props.key ?? 'row')}`)
+      // The result stage must have drawn the result row, not the idle row again, or the result row would go unchecked.
+      if (stage === 'result') expect(wrapping.some(box => box.props.key === 'result')).toBe(true)
+      // A step name, not a number: a number is cells, which the terminal draws as blank rows, so the band would grow there.
+      for (const box of wrapping) if (typeof box.props.rowGap !== 'string') ungapped.push(`${stage} ${String(box.props.key ?? 'row')}`)
     }
     expect(ungapped).toEqual([])
   })
