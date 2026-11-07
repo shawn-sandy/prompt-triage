@@ -283,9 +283,16 @@ async function decisions($: EngineInterface): Promise<Decision[]> {
   return Array.isArray(stored) ? (stored as Decision[]) : []
 }
 
-/** Appends one decision to the log, dropping the oldest past the cap. Rejects when the store does; callers never let that hold a prompt. */
+/**
+ * Appends one decision to the log, dropping the oldest past the cap. Rejects when the store does; callers never let that hold a prompt.
+ * The read is not the forgiving `decisions()`: a read that fails must reject here, or the write would replace the whole log with one entry.
+ * ponytail: read-then-write with no lock, so two sessions rating in the same few milliseconds can lose one entry; the store API has no
+ * atomic update and the log is a tally, so that is accepted. A key per session, merged by /triage-stats, is the upgrade if it ever matters.
+ */
 async function log($: EngineInterface, entry: Decision): Promise<void> {
-  await $.store.set(LOG, [...(await decisions($)), entry].slice(-LOG_CAP))
+  const stored = await $.store.get(LOG)
+  const list = Array.isArray(stored) ? (stored as Decision[]) : []
+  await $.store.set(LOG, [...list, entry].slice(-LOG_CAP))
 }
 
 /**
@@ -605,7 +612,10 @@ export const register: Register = (on, options) => {
     if (answer === REFINE && !improved) {
       improved = true
       const reviewed = await improve($, e.text, await (picks ??= loadPicks($)))
-      return reviewed === undefined ? next(e) : { drop: asLine(reviewed) }
+      if (reviewed !== undefined) return { drop: asLine(reviewed) }
+      // No rewrite will come back to be rated, so this is the session's one entry.
+      await log($, { rating, from: onModel(current), to: onModel(current), chose: REFINE }).catch(() => undefined)
+      return next(e)
     }
 
     const decided = decide(rating, current, answer)

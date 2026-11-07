@@ -24,6 +24,8 @@ type Setup = {
   store?: Record<string, unknown>
   /** Every store write fails, as a full store would. */
   storeFails?: boolean
+  /** Every store read fails, as an unreadable store file would; writes still land. */
+  storeReadFails?: boolean
   /** Runs as each review call starts, as the person typing during the review would. */
   onReview?: () => void
 }
@@ -69,7 +71,10 @@ function engine(on: On, s: Setup) {
   settle = clock.settle
   // The mod's store, kept here so a test reads what was saved.
   const store: Record<string, unknown> = { ...s.store }
-  on('store.get', (_$, e) => ({ value: store[e.key] }))
+  on('store.get', (_$, e) => {
+    if (s.storeReadFails) throw new Error('store unreadable')
+    return { value: store[e.key] }
+  })
   on('store.set', (_$, e) => {
     if (s.storeFails) throw new Error('store full')
     store[e.key] = JSON.parse(JSON.stringify(e.value))
@@ -1165,6 +1170,25 @@ test('free text naming no model is logged as other', async ($, on) => {
 
   await submit($, 'Redesign the auth layer')
   expect((seen.store.decisions as Decision[])[0]?.chose).toBe('other')
+})
+
+test('a failed store read never lets the next write replace the log', async ($, on) => {
+  const old: Decision[] = [{ rating: 'simple', from: 'x', to: 'x', chose: 'old' }]
+  const seen = engine(on, { answer: 'Switch to opus', store: { decisions: old }, storeReadFails: true })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.store.decisions).toEqual(old)
+  expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
+  await step($)
+  expect(seen.steps[0]?.model).toBe('opus')
+})
+
+test('a Refine whose review fails sends the prompt and logs the rated session as Refine prompt', async ($, on) => {
+  const seen = engine(on, { answer: 'Refine prompt' })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
+  expect(seen.store.decisions).toEqual([{ rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Refine prompt' }])
 })
 
 test('refining then sending the rewrite logs one decision, for the rewrite', async ($, on) => {

@@ -121,8 +121,9 @@ store: the rating, the main-loop model before and after, and the option
 chosen (or `none asked` when no dialog was shown, `dismissed`, or **Open in
 a new session**). Free text typed under "Other" is recorded as `other`, plus
 the model alias it named if it named one, never the text itself. Choosing
-**Refine prompt** logs nothing; the rewrite is logged when you send it, so
-one prompt counts once. No prompt text is logged, and the log keeps the
+**Refine prompt** logs nothing while the review succeeds; the rewrite is
+logged when you send it, so one prompt counts once. If the review fails, the
+original prompt is sent and that session is logged as **Refine prompt**. No prompt text is logged, and the log keeps the
 newest 200 entries. `/triage-stats` prints it as a table, one row per
 rating, with how many sessions it rated, how many of those changed model
 tier, and how many of those changes went up to a pricier tier or down to a
@@ -292,6 +293,10 @@ request at all.
 - The override and the effort minimum live in the mod's memory. If the mod
   reloads, the session goes back to its own model and effort. The decision
   log is in the store and survives.
+- The decision log is one list that every session appends to without a lock,
+  since the store has no atomic update. Two sessions rating their first
+  prompt within the same few milliseconds can lose one entry. This is
+  accepted: the log is a tally, and a missing row costs nothing else.
 - Whether a request takes effort is read from the session's model. If you
   switch to a model that takes no effort setting, the status line can still
   say effort was raised, though none is sent; if the session's own model takes
