@@ -1,13 +1,12 @@
 name: check
 
-# Validates the manifest and hooks module and runs hooks/register.test.ts on every pull request
-# and push to main, so a broken mod fails here before bump-version releases it.
+# Validates the manifest and hooks module and runs hooks/register.test.ts on every pull request.
+# bump-version calls this workflow and releases only if it passes, so a broken mod never ships.
 # Neither command needs a signed-in Claude Code. There is no typecheck step: the engine writes
 # .claude-plugin/types/ only for an interactive session, never under CI.
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read

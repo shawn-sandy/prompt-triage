@@ -19,7 +19,7 @@ Pin the documented mid-turn Run in behavior with a test, and give future agents 
 
 A retro of the session that built and merged PR 20 (the Run in picker) found seven environment gaps. This plan covers the ones that live in this repo and are not done yet.
 
-- **Already done on this branch:** `.github/workflows/check.yml` (commit `c42f1c1`) runs `claude plugin validate .` and `claude plugin test .` on every pull request and push to `main`. It has not run on GitHub yet.
+- **Already done on this branch:** `.github/workflows/check.yml` (commit `c42f1c1`) runs `claude plugin validate .` and `claude plugin test .` on every pull request, and `bump-version.yml` runs it before releasing and stops if it fails.
 - **Untested documented behavior:** `hooks/register.ts:254` passes a prompt with `turnId` set straight through, and `:256` says it leaves an armed Run in pick armed. `README.md:41-43` documents it. None of the four Run in tests (`hooks/register.test.ts:691-733`) covers it. This is the exact case the in-session review missed and CodeRabbit flagged.
 - **No navigation pointers:** the repo has no `CLAUDE.md`. The session spent about 10 Bash calls paging through `.claude-plugin/types/claude-code/index.d.ts` (17,305 lines), and its review brief had to repeat those pointers by hand.
 - **No review standards:** no `CODING_STANDARDS.md` exists. The rule the review needed is a judgement call (which states a test must cover), not something a linter can check.

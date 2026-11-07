@@ -287,9 +287,10 @@ the minor number if a pushed commit subject starts with `feat:` or
 publishes a GitHub release tagged `prompt-triage--v<version>`.
 
 Three other workflows run on GitHub: `check.yml` runs `claude plugin validate .`
-and `claude plugin test .` on every pull request and push to `main`,
-`claude.yml` responds when `@claude` is mentioned in an issue or pull request,
-and `claude-code-review.yml` reviews pull requests.
+and `claude plugin test .` on every pull request, and `bump-version` runs it
+first and releases only if it passes; `claude.yml` responds when `@claude` is
+mentioned in an issue or pull request, and `claude-code-review.yml` reviews
+pull requests.
 
 ## License
 
