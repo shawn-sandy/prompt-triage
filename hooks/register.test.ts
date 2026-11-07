@@ -22,6 +22,8 @@ type Setup = {
   draft?: string
   /** What the mod's store holds at the start. */
   store?: Record<string, unknown>
+  /** Every store write fails, as a full store would. */
+  storeFails?: boolean
   /** Runs as each review call starts, as the person typing during the review would. */
   onReview?: () => void
 }
@@ -69,6 +71,7 @@ function engine(on: On, s: Setup) {
   const store: Record<string, unknown> = { ...s.store }
   on('store.get', (_$, e) => ({ value: store[e.key] }))
   on('store.set', (_$, e) => {
+    if (s.storeFails) throw new Error('store full')
     store[e.key] = JSON.parse(JSON.stringify(e.value))
     return { value: undefined }
   })
@@ -354,7 +357,7 @@ test('a session start registers /refine-prompt, the name its command hook answer
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
 
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  expect(registered).toEqual(['refine-prompt'])
+  expect(registered).toEqual(['refine-prompt', 'triage-stats'])
 })
 
 test('/refine-prompt reviews any prompt and puts the rewrite in the prompt box', async ($, on) => {
@@ -1094,3 +1097,134 @@ for (const surface of SURFACES) {
     expect(ungapped).toEqual([])
   })
 }
+
+// --- The decision log and /triage-stats ---
+
+/** One logged decision, as the store holds it. */
+type Decision = { rating: string; from: string; to: string; chose: string }
+
+test('a rated first prompt appends one decision naming the rating, the models before and after and the choice', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer across three services')
+  expect(seen.store.decisions).toEqual([{ rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus' }])
+})
+
+test('a prompt that shows no dialog is logged as asked nothing, and a dismissed dialog as dismissed', async ($, on) => {
+  const s: Setup = { rating: 'moderate', model: 'claude-sonnet-5-5' }
+  const seen = engine(on, s)
+
+  await submit($, 'Rename this function')
+  s.rating = 'complex'
+  await submit($, 'Redesign the auth layer')
+  expect((seen.store.decisions as Decision[]).map(d => [d.rating, d.to, d.chose])).toEqual([
+    ['moderate', 'claude-sonnet-5-5', 'none asked'],
+    ['complex', 'claude-sonnet-5-5', 'dismissed'],
+  ])
+})
+
+test('the decision log never holds more than its cap', async ($, on) => {
+  const old: Decision[] = Array.from({ length: 200 }, (_, i) => ({ rating: 'simple', from: 'x', to: 'x', chose: `old ${i}` }))
+  const seen = engine(on, { answer: 'Switch to opus', store: { decisions: old } })
+
+  await submit($, 'Redesign the auth layer')
+  const kept = seen.store.decisions as Decision[]
+  expect(kept.length).toBe(200)
+  expect(kept[0]?.chose).toBe('old 1')
+  expect(kept.at(-1)?.chose).toBe('Switch to opus')
+})
+
+test('a failed store write does not hold up the prompt or the switch', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus', storeFails: true })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
+  await step($)
+  expect(seen.steps[0]?.model).toBe('opus')
+})
+
+test('a failed store write still hands the prompt to a new session', async ($, on) => {
+  // Without the log's own catch, the hook's outer catch would forward the prompt and silently drop the hand-off context.
+  const seen = engine(on, { surfaces: ['desktop'], answer: 'Open in a new session', storeFails: true })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.submitted[0]?.context?.some(c => c.includes('start_session'))).toBe(true)
+})
+
+test('free text under Other is logged as the model it names, never the text itself', async ($, on) => {
+  const seen = engine(on, { answer: "use sonnet, it's the Stripe migration for acme" })
+
+  await submit($, 'Redesign the auth layer')
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry).toEqual({ rating: 'complex', from: 'claude-sonnet-5-5', to: 'sonnet', chose: 'other: sonnet' })
+  expect(JSON.stringify(seen.store)).not.toContain('Stripe')
+})
+
+test('free text naming no model is logged as other', async ($, on) => {
+  const seen = engine(on, { answer: 'whatever you think' })
+
+  await submit($, 'Redesign the auth layer')
+  expect((seen.store.decisions as Decision[])[0]?.chose).toBe('other')
+})
+
+test('refining then sending the rewrite logs one decision, for the rewrite', async ($, on) => {
+  const seen = engine(on, { answer: ['Refine prompt', 'Switch to opus'], review: REVIEWED })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.store.decisions).toBeUndefined()
+  await submit($, seen.filled[0]!)
+  expect((seen.store.decisions as Decision[]).map(d => d.chose)).toEqual(['Switch to opus'])
+})
+
+test('a session start registers /triage-stats beside /refine-prompt', async ($, on) => {
+  const registered: string[] = []
+  on('command.register', (_$, e) => {
+    registered.push(e.name)
+    return { value: { command: e.name } }
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  expect(registered).toContain('triage-stats')
+})
+
+test('/triage-stats tallies every rating and how often a switch was accepted', async ($, on) => {
+  const decisions: Decision[] = [
+    { rating: 'simple', from: 'claude-sonnet-5-5', to: 'haiku', chose: 'Switch to haiku' },
+    { rating: 'simple', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Keep model, effort low' },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus' },
+    { rating: 'long-running', from: 'claude-opus-5-5', to: 'fable', chose: 'Switch to fable' },
+    { rating: 'long-running', from: 'claude-opus-5-5', to: 'claude-opus-5-5', chose: 'dismissed' },
+    // "use opus" typed while already on opus: the alias differs from the session's name, but the tier does not, so no switch.
+    { rating: 'complex', from: 'claude-opus-5-5', to: 'opus', chose: 'other: opus' },
+  ]
+  engine(on, { turns: 3, store: { decisions } })
+
+  const { text } = await command($, 'triage-stats')
+  // Rated, switched, up, down.
+  expect(text).toContain('| simple | 2 | 1 | 0 | 1 |')
+  expect(text).toContain('| moderate | 0 | 0 | 0 | 0 |')
+  expect(text).toContain('| complex | 2 | 1 | 1 | 0 |')
+  expect(text).toContain('| long-running | 2 | 1 | 1 | 0 |')
+})
+
+test('/triage-stats with nothing logged says so', async ($, on) => {
+  engine(on, { turns: 3 })
+
+  const { text } = await command($, 'triage-stats')
+  expect(text).toContain('No decisions')
+})
+
+test('a simple prompt two tiers above haiku lists the switch before the low-effort option', async ($, on) => {
+  const seen = engine(on, { rating: 'simple', model: 'claude-opus-5-5', answer: 'Keep current model' })
+
+  await submit($, 'What does git rebase --onto do?')
+  expect(seen.asked).toEqual([['Switch to haiku', 'Keep model, effort low', 'Keep current model', 'Refine prompt']])
+})
+
+test('a simple prompt one tier above haiku keeps the low-effort option first', async ($, on) => {
+  const seen = engine(on, { rating: 'simple', model: 'claude-sonnet-5-5', answer: 'Keep current model' })
+
+  await submit($, 'What does git rebase --onto do?')
+  expect(seen.asked).toEqual([['Keep model, effort low', 'Switch to haiku', 'Keep current model', 'Refine prompt']])
+})
