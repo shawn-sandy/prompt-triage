@@ -79,7 +79,9 @@ const PICKERS = {
 type Picker = keyof typeof PICKERS
 type Picks = { [K in Picker]: keyof (typeof PICKERS)[K]['options'] & string }
 // A band row: a cell between controls, wrapping to a second row where the band is too narrow for every pick's label.
-const ROW = { columnGap: 1, flexWrap: 'wrap' } as const
+// rowGap is a step name, so each surface sizes it: the desktop's gap-sm token (0.5rem, 0.75rem in comfortable density), where with no gap a
+// wrapped Run in line sat against the buttons above it (as reported); the mod API types draw a step as 0 rows down on the terminal.
+const ROW = { columnGap: 1, rowGap: 'sm', flexWrap: 'wrap' } as const
 const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
 
 /** The picks saved in the mod's store, each one that is missing or not an option at its default. */
