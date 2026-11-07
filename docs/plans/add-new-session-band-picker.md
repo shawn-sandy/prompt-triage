@@ -1,7 +1,8 @@
 ---
-status: todo
+status: in-progress
 type: feature
 created: 2026-11-06
+modified: 2026-11-06
 repo-name: prompt-triage
 workflow: never
 artifact-url: https://claude.ai/artifact/Q9ZN1Fr8DFDJGmjNqrPyu8
@@ -54,26 +55,26 @@ Prerequisite and risks:
 
 ### Phase: Docs
 
-2. Update `docs/proposals/refine-band.md`: add a "Run in" picker table (This session, New session) after Run mode, replace the "Opening the task in a new session is already offered by the model dialog … not repeated here" paragraph with the one-shot, skip-the-dialog and desktop-only rules, and add Run in to the band layout line. Why: the proposal is the design record, and it currently says the opposite. Verify: `grep -n "not repeated here" docs/proposals/refine-band.md` finds nothing and `npx prettier --check docs/proposals/refine-band.md` passes.
-3. Add the Run in picker to `docs/prototypes/refine-prompt-band.html`; when it is set to New session, Send adds a transcript line "(prototype: a new session would start with this prompt as its brief)", skips the model dialog, and resets the picker. Why: the prototype is what reviewers click through, and it should match the proposal. Verify: in the browser, set Run in to New session and press Send: the hand-off line appears, no dialog opens, the picker reads This session again, and `read_console_messages` shows no errors.
+2. [x] Update `docs/proposals/refine-band.md`: add a "Run in" picker table (This session, New session) after Run mode, replace the "Opening the task in a new session is already offered by the model dialog … not repeated here" paragraph with the one-shot, skip-the-dialog and desktop-only rules, and add Run in to the band layout line. Why: the proposal is the design record, and it currently says the opposite. Verify: `grep -n "not repeated here" docs/proposals/refine-band.md` finds nothing and `npx prettier --check docs/proposals/refine-band.md` passes.
+3. [x] Add the Run in picker to `docs/prototypes/refine-prompt-band.html`; when it is set to New session, Send adds a transcript line "(prototype: a new session would start with this prompt as its brief)", skips the model dialog, and resets the picker. Why: the prototype is what reviewers click through, and it should match the proposal. Verify: in the browser, set Run in to New session and press Send: the hand-off line appears, no dialog opens, the picker reads This session again, and `read_console_messages` shows no errors.
 
 ### Phase: RED
 
-4. Add a test to `hooks/register.test.ts`: with `surfaces: ['desktop']` and the Run in pick set to New session, a submitted prompt carries a context entry containing `start_session`, and `seen.asked` is empty. Why: this is the objective (an armed send hands off without the dialog). Verify: `claude plugin test .` fails on this test with the context missing `start_session`, not on an import or setup error.
-5. Add a test that the pick resets: after one armed send, a second submitted prompt carries no `start_session` context. Why: a sticky pick would hand off prompts the user meant to run here. Verify: `claude plugin test .` fails on this test for the expected reason.
-6. Add a test that the hand-off works after the first prompt: with `$.session.turns()` above 0 and the pick armed, the prompt still carries the `HANDOFF` context. Why: the submit hook's early return currently skips every later prompt. Verify: `claude plugin test .` fails on this test because the context is missing.
-7. Add a test that with `surfaces: ['terminal']` the band tree has no Run in control and an armed pick (set before the surface changed) sends the prompt without `HANDOFF` and calls `$.ui.toast`. Why: `start_session` does not exist outside the desktop app. Verify: `claude plugin test .` fails on this test for the expected reason.
+4. [x] Add a test to `hooks/register.test.ts`: with `surfaces: ['desktop']` and the Run in pick set to New session, a submitted prompt carries a context entry containing `start_session`, and `seen.asked` is empty. Why: this is the objective (an armed send hands off without the dialog). Verify: `claude plugin test .` fails on this test with the context missing `start_session`, not on an import or setup error.
+5. [x] Add a test that the pick resets: after one armed send, a second submitted prompt carries no `start_session` context. Why: a sticky pick would hand off prompts the user meant to run here. Verify: `claude plugin test .` fails on this test for the expected reason.
+6. [x] Add a test that the hand-off works after the first prompt: with `$.session.turns()` above 0 and the pick armed, the prompt still carries the `HANDOFF` context. Why: the submit hook's early return currently skips every later prompt. Verify: `claude plugin test .` fails on this test because the context is missing.
+7. [x] Add a test that with `surfaces: ['terminal']` the band tree has no Run in control and an armed pick (set before the surface changed) sends the prompt without `HANDOFF` and calls `$.ui.toast`. Why: `start_session` does not exist outside the desktop app. Verify: `claude plugin test .` fails on this test for the expected reason.
 
 ### Phase: GREEN
 
-8. Add the one-shot Run in pick to the band's pick state in `hooks/register.ts`, and draw its `Select` in the band only when `$.session.surfaces()` includes `desktop`. Why: the control and its state are what the tests read. Verify: `claude plugin test .` passes step 7's band-tree assertion.
-9. In the `prompt.submit` hook, before the `turns() > 0` early return, handle an armed pick: reset it, then on desktop return `next({ ...e, context: [...(e.context ?? []), HANDOFF] })` without calling `choose()`, and off desktop toast "No desktop app attached; sent in this session" and fall through. Why: this is the hand-off itself, placed where every prompt reaches it. Verify: `claude plugin test .` passes steps 4 to 7. If tests still fail after 8 iterations, stop and report the exact blocker: the failing assertion, the last diff tried, and what was ruled out. Do not report success.
+8. [x] Add the one-shot Run in pick to the band's pick state in `hooks/register.ts`, and draw its `Select` in the band only when `$.session.surfaces()` includes `desktop`. Why: the control and its state are what the tests read. Verify: `claude plugin test .` passes step 7's band-tree assertion.
+9. [x] In the `prompt.submit` hook, before the `turns() > 0` early return, handle an armed pick: reset it, then on desktop return `next({ ...e, context: [...(e.context ?? []), HANDOFF] })` without calling `choose()`, and off desktop toast "No desktop app attached; sent in this session" and fall through. Why: this is the hand-off itself, placed where every prompt reaches it. Verify: `claude plugin test .` passes steps 4 to 7. If tests still fail after 8 iterations, stop and report the exact blocker: the failing assertion, the last diff tried, and what was ruled out. Do not report success.
 
 ### Phase: VERIFY
 
-10. Run the full suite and the type check. Why: the hand-off sits in the same hook as the rating, refine and effort paths. Verify: `claude plugin test .` exits 0 with every existing test passing, and `npx tsc --noEmit -p .` exits 0.
+10. [x] Run the full suite and the type check. Why: the hand-off sits in the same hook as the rating, refine and effort paths. Verify: `claude plugin test .` exits 0 with every existing test passing, and `npx tsc --noEmit -p .` exits 0.
 11. Document the picker in `README.md` next to **Open in a new session**, and update the `prompt.submit` row of the hooks table to say an armed Run in pick is handled on any prompt. Why: the README's hooks table currently says only the first prompt is touched. Verify: `grep -n "Run in" README.md` matches both places and `npx prettier --check README.md` passes.
-12. Walk it by hand in the desktop app with `claude --plugin-dir .`: type a second prompt in a session, set Run in to New session, press Enter. Why: the tests mock the engine; only a real session proves `start_session` is called. Verify: a new session card appears with the prompt as its brief, no model dialog opened, and the band shows Run in: This session afterwards.
+12. [x] Walk it by hand in the desktop app with `claude --plugin-dir .`: type a second prompt in a session, set Run in to New session, press Enter. Why: the tests mock the engine; only a real session proves `start_session` is called. Verify: a new session card appears with the prompt as its brief, no model dialog opened, and the band shows Run in: This session afterwards.
 
 ## Tests
 
@@ -85,16 +86,21 @@ Tier 1 — This plan changes application code
 
 ## Acceptance Criteria
 
-- [ ] In the desktop app, the band shows a Run in picker with This session and New session; in the terminal it does not.
-- [ ] With Run in set to New session, pressing Enter sends the prompt with the `HANDOFF` context and no model dialog, on the first prompt or any later one.
-- [ ] After that send, the picker reads This session again and the next prompt runs in this session.
-- [ ] With no desktop surface attached at send time, an armed prompt is sent normally and a toast explains why.
-- [ ] `docs/proposals/refine-band.md` no longer says the new-session option is "not repeated here", and the prototype shows the picker.
-- [ ] `claude plugin test .` and `npx tsc --noEmit -p .` exit 0.
+- [x] In the desktop app, the band shows a Run in picker with This session and New session; in the terminal it does not.
+- [x] With Run in set to New session, pressing Enter sends the prompt with the `HANDOFF` context and no model dialog, on the first prompt or any later one.
+- [x] After that send, the picker reads This session again and the next prompt runs in this session.
+- [x] With no desktop surface attached at send time, an armed prompt is sent normally and a toast explains why.
+- [x] `docs/proposals/refine-band.md` no longer says the new-session option is "not repeated here", and the prototype shows the picker.
+- [x] `claude plugin test .` and `npx tsc --noEmit -p .` exit 0.
 
 ## Verification
 
 Run `claude plugin test .` and confirm it exits 0 with the four new tests listed. Then start `claude --plugin-dir .` in the desktop app, send one ordinary prompt so the session has a turn, type a second prompt, set Run in to New session and press Enter: a new session starts with that prompt as its brief, no model dialog appears, and the band's picker reads This session. Repeat in a terminal session and confirm the band has no Run in picker.
+
+## Completion Report
+
+- Step 1, the phase 1 gate — did not hold: PR 18 merged only the band proposal and prototype. To reach the outcome, the `AbovePrompt` hook was built here holding only the Run in picker; band phase 1 adds its pickers to the same hook. The picker draws when `e.surface` is `desktop` rather than calling `$.session.surfaces()` at draw time; the send-time check still calls it.
+- Step 11, `npx prettier --check README.md` — fails on the README's compact tables, which already failed on `main` before this plan. Both Run in places are documented and the new paragraph is prettier-clean.
 
 ## Next Steps
 

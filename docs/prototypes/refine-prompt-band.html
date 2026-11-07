@@ -202,7 +202,7 @@
   function savePrefs() { try { localStorage.setItem(STORE_KEY, JSON.stringify(prefs)); } catch (e) {} }
 
   var prefs = loadPrefs();
-  var state = { firstSent: false, offeredRefine: true, busy: false, original: null, result: null, showIssues: false };
+  var state = { firstSent: false, offeredRefine: true, busy: false, original: null, result: null, showIssues: false, runIn: "here" };
 
   var $ = function (id) { return document.getElementById(id); };
   var draft = $("draft"), band = $("band"), hint = $("band-hint"), transcript = $("transcript"), statusEl = $("status");
@@ -243,6 +243,14 @@
       sel.addEventListener("change", function () { prefs.picks[key] = sel.value; savePrefs(); });
       wrap.appendChild(sel); row.appendChild(wrap);
     });
+    // Run in is one-shot and desktop-only, so it is kept in state, not saved with the other picks.
+    var runWrap = el("label", "pick");
+    runWrap.appendChild(document.createTextNode("Run in:"));
+    var runSel = el("select"); runSel.id = "pick-run-in";
+    [["here", "This session"], ["new", "New session"]].forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; runSel.appendChild(op); });
+    runSel.value = state.runIn;
+    runSel.addEventListener("change", function () { state.runIn = runSel.value; });
+    runWrap.appendChild(runSel); row.appendChild(runWrap);
     var btn = el("button", "bbtn"); btn.type = "button"; btn.id = "refine-btn";
     btn.appendChild(el("span", "key", "[r] ")); btn.appendChild(document.createTextNode(state.busy ? "Reviewing with haiku..." : "Refine"));
     btn.disabled = state.busy;
@@ -429,6 +437,14 @@
     var text = draft.value;
     if (!text.trim() || state.busy || !overlay.hidden) return;
     var isCommand = text.trim().charAt(0) === "/";
+    // An armed Run in skips the rating and model dialog: the prompt goes to a new session, which rates it there.
+    if (state.runIn === "new" && !isCommand) {
+      state.runIn = "here"; state.firstSent = true; state.result = null;
+      addLine("msg-user", text);
+      addLine("msg-dim", "(prototype: a new session would start with this prompt as its brief)");
+      draft.value = ""; renderBand(); draft.focus(); announce("Sent to a new session. Run in is back to This session.");
+      return;
+    }
     if (!state.firstSent && !isCommand) {
       var opts = ["Switch to sonnet", "Keep current model"];
       if (state.offeredRefine) opts.push("Refine prompt");
@@ -451,7 +467,7 @@
   $("cfg-drop").addEventListener("change", function (e) { prefs.drop = e.target.value; savePrefs(); });
   $("reset").addEventListener("click", function () {
     while (transcript.firstChild) transcript.removeChild(transcript.firstChild);
-    state = { firstSent: false, offeredRefine: true, busy: false, original: null, result: null, showIssues: false };
+    state = { firstSent: false, offeredRefine: true, busy: false, original: null, result: null, showIssues: false, runIn: "here" };
     draft.value = SAMPLE; intro(); renderBand(); announce("Reset to the sample draft.");
   });
 

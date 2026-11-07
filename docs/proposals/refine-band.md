@@ -145,8 +145,10 @@ write Claude Code's prompt box. Reject.
 ### Layout (terminal, one row; the desktop draws the same tree natively)
 
 ```text
-Refine  Goal: Auto  Workflow: As written  Scope: As written  Run: Watching   [r] Refine
+Refine  Goal: Auto  Workflow: As written  Scope: As written  Run: Watching  Run in: This session   [r] Refine
 ```
+
+Run in is drawn in the desktop app only (see [Run in](#run-in-this-session-or-a-new-one)).
 
 Each label is a `Select`. Picks are saved to `$.store` and come back next
 session. **Refine** has hotkey `r` once the band has focus.
@@ -243,8 +245,8 @@ commands, so sending it starts the goal directly, as `/goal` does.
 | Interview me         | Rewrites into "interview me until you could write the spec, then write it to SPEC.md" around the user's topic                                | CC best practices: "Brainstorm with Claude first"                    |
 | Test first           | For a bug: describe the symptom, write a failing test that reproduces it, then fix it                                                        | CC best practices: "Write a specific prompt" (the login-bug example) |
 
-Opening the task in a new session is already offered by the model dialog for
-complex and long-running prompts, so it is not repeated here.
+Opening the task in a new session is its own picker, Run in, below, so it is
+not tied to a workflow or to the first prompt.
 
 ### Scope: how much to build
 
@@ -260,6 +262,28 @@ complex and long-running prompts, so it is not repeated here.
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Watching (default) | No change                                                                                                                                                                                                             |                                                                                                       |
 | Unattended         | Checks the five pre-run questions: what done looks like, how it checks its own work, what it may touch, what stops it, where the result goes and who signs off. Missing answers become questions, not invented values | CC best practices: "Let Claude run without you"; Prompting Claude Opus 5.5: "Unattended agentic runs" |
+
+### Run in: this session or a new one
+
+| Pick                   | Effect on the send                                                                                     | Source                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| This session (default) | None                                                                                                   |                                                                               |
+| New session            | Enter sends the prompt with the `HANDOFF` context, so Claude starts a new session with it as the brief | prompt-triage's model dialog option **Open in a new session** (`NEW_SESSION`) |
+
+Run in differs from the other pickers in three ways:
+
+- It is one-shot: it applies to the next send and then reads This session
+  again, so it never hands off a later prompt by surprise. It is not saved to
+  `$.store`.
+- An armed send skips the rating and the model dialog. The prompt is leaving
+  this session, and the new session rates its own first prompt.
+- It is drawn in the desktop app only, because `start_session` exists only
+  there. If the desktop app has detached by the time the prompt is sent, the
+  prompt runs in this session and a toast says why.
+
+It works on any prompt, not only the first, and needs no Refine press.
+Shipped ahead of the rest of the band; the other pickers join it in the same
+`AbovePrompt` hook.
 
 Picks that conflict (Interview me with Goal: As `/goal`) are resolved by the
 reviewer instruction order: Workflow first, then Goal. The result row says

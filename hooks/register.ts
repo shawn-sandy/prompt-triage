@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PromptSubmitInput, Register } from 'claude-code'
+import type { EngineInterface, ModelEffort, PromptSubmitInput, Register, RenderElement } from 'claude-code'
 
 // Each rating and the model alias it suggests.
 const SUGGEST = { simple: 'haiku', moderate: 'sonnet', complex: 'opus', 'long-running': 'fable' } as const
@@ -216,6 +216,28 @@ export const register: Register = on => {
   const line = () => [running, raised && effort && `effort ${exact ? 'lowered' : 'raised'} to ${effort}`].filter(Boolean).join(', ') || undefined
   // Set once the first prompt was improved, so its rewrite is rated again without a second offer.
   let improved = false
+  // The band's Run in pick: true sends the next prompt to a new session, then resets, so it never hands off a later one by surprise.
+  let handOff = false
+
+  // The refine band's Run in picker, drawn above whatever else draws the band; a survey holds the band alone.
+  // Drawn on the desktop surface only: a band drawn there means the desktop app, where start_session exists, is attached.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.surface !== 'desktop' || e.props.hasSurvey) return next(e)
+    const { Box, Select } = $.ui.resolve(e)
+    const picker = h(Select, {
+      key: 'run-in',
+      label: 'Run in',
+      value: handOff ? 'new' : 'here',
+      options: [
+        { value: 'here', label: 'This session' },
+        { value: 'new', label: 'New session' },
+      ],
+      onSelect: (value: string) => {
+        handOff = value === 'new'
+      },
+    })
+    return h(Box, null, picker, await next(e)) as RenderElement
+  })
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'refine-prompt', description: 'Review a prompt and put an improved one in the prompt box', argumentHint: '<prompt>' })
@@ -229,7 +251,16 @@ export const register: Register = on => {
   }).catch(() => ({ text: 'The review failed; nothing was changed.' }))
 
   on('prompt.submit', async ($, e, next) => {
-    if (e.command || e.isMeta || e.turnId || (await $.session.turns()) > 0) return next(e)
+    if (e.command || e.isMeta || e.turnId) return next(e)
+    // An armed Run in pick goes before the first-prompt check, so it hands off any prompt; the new session rates it there.
+    // ponytail: a prompt typed over a running turn (turnId) leaves the pick armed for the next idle send
+    if (handOff) {
+      handOff = false
+      $.ui.invalidate('ui.render')
+      if ((await $.session.surfaces()).includes('desktop')) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
+      $.ui.toast('No desktop app attached; sent in this session')
+    }
+    if ((await $.session.turns()) > 0) return next(e)
 
     const rated = await choose($, e, !improved)
     if (rated === undefined) return next(e)
