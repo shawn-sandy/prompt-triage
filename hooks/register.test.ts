@@ -1047,3 +1047,12 @@ test('Refine returns at once and reviews from a timer, since a press has a 10 s 
   expect(seen.reviews.length).toBe(1)
   expect(seen.filled.length).toBe(1)
 })
+
+test('focusing the band starts on Refine, so r or Enter refines at once', async ($, on) => {
+  engine(on, { draft: LONG, surfaces: ['desktop'] })
+  for (const surface of SURFACES) {
+    const ui = await band($, surface)
+    const focused = [...(await ui.findAll({ type: 'Select' })), ...(await ui.findAll({ type: 'Button' }))].filter(e => e.props.autoFocus)
+    expect(focused.map(e => e.props.key)).toEqual(['refine'])
+  }
+})

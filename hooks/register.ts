@@ -379,6 +379,8 @@ export const register: Register = (on, options) => {
       label: busy ? 'Reviewing with haiku...' : 'Refine',
       hotkey: 'r',
       variant: 'primary',
+      // Focus starts here, not on the Goal picker, whose open list would take the r; Tab still reaches the pickers.
+      autoFocus: true,
       onPress: () => {
         if (busy) return
         busy = true
