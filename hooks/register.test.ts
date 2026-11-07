@@ -626,6 +626,22 @@ test('a long-running prompt on opus offers fable, and a new session in the deskt
   expect(seen.steps[0]?.model).toBe('fable')
 })
 
+test('a long-running prompt on sonnet offers opus as a step down from fable', async ($, on) => {
+  const seen = engine(on, { rating: 'long-running', model: 'claude-sonnet-5-5', answer: 'Switch to opus' })
+
+  await submit($, 'Migrate the whole codebase from Express to Fastify')
+  expect(seen.asked).toEqual([['Switch to fable', 'Switch to opus', 'Keep current model', 'Refine prompt']])
+  await step($, undefined, 'medium')
+  expect(seen.steps[0]?.model).toBe('opus')
+})
+
+test('a complex prompt on sonnet offers no step down, since opus is already the suggestion', async ($, on) => {
+  const seen = engine(on, { rating: 'complex', model: 'claude-sonnet-5-5', answer: 'Keep current model' })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Refine prompt']])
+})
+
 for (const model of ['claude-fable-5-1', 'claude-mythos-5-1']) {
   test(`a long-running prompt on ${model} offers no switch`, async ($, on) => {
     const seen = engine(on, { rating: 'long-running', model, answer: 'Switch to fable' })

@@ -8,6 +8,10 @@ const FLOOR: Record<Rating, ModelEffort | undefined> = { simple: undefined, mode
 const LEVELS: readonly ModelEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 // The two ratings that want the strongest model, so one already at or above the suggestion fits.
 const STRONG: readonly Rating[] = ['complex', 'long-running']
+// ponytail: long-running is the only rating whose suggestion sits two tiers above the next rating's, and the rater's
+// measured misses over-rate complex as long-running, so it alone offers the tier below as a one-click correction.
+// Upgrade path: if a later eval shows another rating over-rating, give that one a step down too.
+const STEP_DOWN: Partial<Record<Rating, string>> = { 'long-running': SUGGEST.complex }
 
 const ALIASES = ['haiku', 'sonnet', 'opus', 'fable'] as const
 // Model families by strength; Mythos ranks with Fable.
@@ -285,10 +289,14 @@ async function choose(
     // lower ratings still offer a cheaper one.
     const have = rank(current)
     const fits = strong ? have === undefined || have >= RANK[suggested]! : current.toLowerCase().includes(suggested)
+    // The tier below the suggestion, offered after it and only while it is itself a step up from the current model.
+    const under = STEP_DOWN[rating]
+    const below = under !== undefined && !fits && have !== undefined && have < RANK[under]! ? under : undefined
     // The guide prefers lowering effort to switching models, so a simple prompt is offered that first, wherever the dialog shows.
     const options = [
       ...(rating === 'simple' && !fits ? [LOW_EFFORT] : []),
       ...(fits ? [] : [`Switch to ${suggested}`]),
+      ...(below ? [`Switch to ${below}`] : []),
       KEEP,
       ...(canHandOff ? [NEW_SESSION] : []),
     ]

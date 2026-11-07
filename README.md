@@ -24,6 +24,14 @@ desktop app it can also hand a complex or long-running task to a new session.
    from the model you are on, a dialog asks whether to switch or keep the
    current model. Under "Other" you can type a model name, such as
    `use sonnet` or `use fable`.
+
+   A `long-running` rating also offers **Switch to opus** under the `fable`
+   suggestion, whenever opus is itself a step up from your current model.
+   `fable` is the one suggestion two tiers above the next rating's, and the
+   rating eval's misses over-rate `complex` prompts as `long-running` (see
+   [Evaluating the rating](#evaluating-the-rating)), so the tier below is one
+   click away rather than something to type under "Other". No other rating
+   offers a step down.
 3. For a `simple` prompt the dialog's first option is **Keep model, effort
    low**: it keeps your model and runs the main conversation at effort `low`,
    since lowering effort is often a better lever than switching models. The
@@ -254,6 +262,10 @@ you answer its questions. The band makes no request while you type.
   as `Default (recommended)`, counts as strong enough for both, so it is never
   offered a step down. `simple` and `moderate` prompts are still offered the
   cheaper model.
+- The `long-running` step down to opus is skipped when opus is not a step up
+  from your current model, so a `long-running` prompt already on opus is
+  offered `fable` or nothing else, and one on Fable, Mythos or an unrecognized
+  name is offered neither.
 - The override and the effort minimum live in the mod's memory. If the mod
   reloads, the session goes back to its own model and effort.
 - Whether a request takes effort is read from the session's model. If you
