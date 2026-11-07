@@ -27,12 +27,12 @@ jobs:
     steps:
       # main requires PRs; this App is on the ruleset's bypass list so the bump commit can push.
       - id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ vars.BUMP_APP_ID }}
           private-key: ${{ secrets.BUMP_APP_PRIVATE_KEY }}
           permission-contents: write # the token needs only checkout, push and release
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # the subjects of every pushed commit are read below
           token: ${{ steps.app-token.outputs.token }}

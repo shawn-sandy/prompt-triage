@@ -15,7 +15,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # The tests run the pull request's code; nothing here pushes, so the token is not left in .git/config.
+          persist-credentials: false
       # Pinned so the plugin API the tests run against changes only when this line does.
       - run: npm install -g @anthropic-ai/claude-code@2.1.319
       - run: claude plugin validate .

@@ -18,7 +18,21 @@ const ALIASES = ['haiku', 'sonnet', 'opus', 'fable'] as const
 const RANK: Record<string, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3, mythos: 3 }
 /** The model's rank, or undefined for a name that holds no known family, such as "Default (recommended)". */
 const rank = (model: string) => Object.entries(RANK).find(([family]) => model.toLowerCase().includes(family))?.[1]
-const KEEP = 'Keep current model'
+/** The store key under which the mod logs each model and effort decision, and how many entries it keeps. */
+const LOG = 'decisions'
+// ponytail: ~100 bytes an entry, so 200 is ~20 KiB of the store's 4 MiB; raise it once /triage-stats wants a longer history
+const LOG_CAP = 200
+/** One logged decision: the rating, the main-loop model before and after, and the option chosen. */
+type Decision = { rating: Rating; from: string; to: string; chose: string }
+/** What each rating says it would take, said in the dialog beside the rating so the suggestion is read with its reason. */
+const SIZE: Record<Rating, string> = {
+  simple: 'haiku or low effort would do',
+  moderate: 'a sonnet-sized task',
+  complex: 'an opus-sized task',
+  'long-running': 'a fable-sized job',
+}
+/** The dialog's keep option names the model it keeps, so the choice reads without translating "current". */
+const keep = (model: string) => `Keep ${model}`
 const LOW_EFFORT = 'Keep model, effort low'
 const NEW_SESSION = 'Open in a new session'
 const REFINE = 'Refine prompt'
@@ -176,7 +190,8 @@ async function review(
     ...new Set(
       s
         .split(/\s+/)
-        .map(t => t.replace(/^[`'"(<\[]+|[`'")>\],.:;!?]+$/g, ''))
+        // The lookbehind starts the trailing run only at its first character; without it a long run not at the end is rescanned from every position.
+        .map(t => t.replace(/^[`'"(<\[]+|(?<![`'")>\],.:;!?])[`'")>\],.:;!?]+$/g, ''))
         .filter(t => PATH.test(t.replaceAll('*', 'x')) && !t.includes('//')),
     ),
   ]
@@ -271,51 +286,108 @@ function asLine({ issues, note }: { issues: string[]; note: string }): string {
   return `Held for review. ${found} ${note}`
 }
 
-/** Rates the prompt and asks the person; answer undefined when there is nothing to ask, all undefined when rating failed or they dismissed it. */
+/** The decisions the store holds, oldest first; an empty list when there are none or the read failed. */
+async function decisions($: EngineInterface): Promise<Decision[]> {
+  const stored = await $.store.get(LOG).catch(() => undefined)
+  return Array.isArray(stored) ? (stored as Decision[]) : []
+}
+
+/**
+ * Appends one decision to the log, dropping the oldest past the cap. Rejects when the store does; callers never let that hold a prompt.
+ * The read is not the forgiving `decisions()`: a read that fails must reject here, or the write would replace the whole log with one entry.
+ * ponytail: read-then-write with no lock, so two sessions rating in the same few milliseconds can lose one entry; the store API has no
+ * atomic update and the log is a tally, so that is accepted. A key per session, merged by /triage-stats, is the upgrade if it ever matters.
+ */
+async function log($: EngineInterface, entry: Decision): Promise<void> {
+  const stored = await $.store.get(LOG)
+  const list = Array.isArray(stored) ? (stored as Decision[]) : []
+  await $.store.set(LOG, [...list, entry].slice(-LOG_CAP))
+}
+
+/**
+ * The log as a markdown tally: for each rating, how many sessions it rated, how many of those switched model, and of the switches
+ * how many went up to a pricier tier and how many down to a cheaper one (by RANK; a pair the mod cannot rank counts as neither).
+ */
+function tally(list: Decision[]): string {
+  if (!list.length) return 'No decisions logged yet. The mod logs one each time it rates a first prompt.'
+  const rows = (Object.keys(SUGGEST) as Rating[]).map(rating => {
+    const of = list.filter(d => d.rating === rating)
+    // A switch is a change of tier where both ends rank ("use opus" on claude-opus-5-5 is none); unrankable names compare as text.
+    const dir = (d: Decision) => {
+      const [a, b] = [rank(d.from), rank(d.to)]
+      return a === undefined || b === undefined ? (d.to === d.from ? 0 : undefined) : Math.sign(b - a)
+    }
+    const switched = of.filter(d => dir(d) !== 0)
+    return `| ${rating} | ${of.length} | ${switched.length} | ${switched.filter(d => dir(d) === 1).length} | ${switched.filter(d => dir(d) === -1).length} |`
+  })
+  return `${list.length} decision${list.length === 1 ? '' : 's'} logged (the newest ${LOG_CAP} are kept).\n\n| Rating | Rated | Switched model | Up (pricier) | Down (cheaper) |\n| --- | --- | --- | --- | --- |\n${rows.join('\n')}`
+}
+
+/**
+ * The answer as the log records it: an offered label as is, and free text under "Other" as `other`, with the model alias it named
+ * when it named one. The text itself is never stored: it can carry anything the person typed.
+ */
+function chosen(answer: string): string {
+  if ([LOW_EFFORT, NEW_SESSION, REFINE].includes(answer) || /^(?:Switch to (?:haiku|sonnet|opus|fable)|Keep \S+)$/.test(answer)) return answer
+  const picked = pickedModel(answer)
+  return picked ? `other: ${picked}` : 'other'
+}
+
+/** The model alias an answer names, or undefined: the label chosen, or free text under "Other" such as "use sonnet". */
+function pickedModel(answer: string | undefined): string | undefined {
+  // Text naming two models ("not haiku, use opus") is ambiguous, so it switches nothing.
+  const said = answer?.toLowerCase() ?? ''
+  const named = ALIASES.filter(alias => said.includes(alias))
+  // ponytail: any no-word switches nothing, so "no, use opus" is missed too; /model covers that, and a wrong switch is worse
+  const turnedDown = /\b(?:no|not|don't|dont|never|avoid|without)\b/.test(said)
+  return named.length === 1 && !turnedDown ? named[0] : undefined
+}
+
+/**
+ * Rates the prompt and asks the person. `answer` is undefined when there was nothing to ask and `dismissed` set when they closed the
+ * dialog; all undefined when the rating failed.
+ */
 async function choose(
   $: EngineInterface,
   e: PromptSubmitInput,
   canImprove: boolean,
-): Promise<{ rating: Rating; answer?: string } | undefined> {
-  try {
-    const rated = await rate($, e.text)
-    if (!rated) return undefined
-    const { rating, reading } = rated
+): Promise<{ rating: Rating; current: string; answer?: string; dismissed?: boolean } | undefined> {
+  const rated = await rate($, e.text).catch(() => undefined)
+  if (!rated) return undefined
+  const { rating, reading } = rated
 
-    const current = await $.session.model()
-    const suggested = SUGGEST[rating]
-    const strong = STRONG.includes(rating)
-    // ponytail: start_session exists only in the desktop app, so the hand-off is offered there alone
-    const canHandOff = strong && (await $.session.surfaces()).includes('desktop')
-    // A strong rating fits a model ranked at or above its suggestion, or one the mod cannot rank, so it never offers a step down;
-    // lower ratings still offer a cheaper one.
-    const have = rank(current)
-    const fits = strong ? have === undefined || have >= RANK[suggested]! : current.toLowerCase().includes(suggested)
-    // The tier below the suggestion, offered after it and only while it is itself a step up from the current model.
-    const under = STEP_DOWN[rating]
-    const below = under !== undefined && !fits && have !== undefined && have < RANK[under]! ? under : undefined
-    // The guide prefers lowering effort to switching models, so a simple prompt is offered that first, wherever the dialog shows.
-    const options = [
-      ...(rating === 'simple' && !fits ? [LOW_EFFORT] : []),
-      ...(fits ? [] : [`Switch to ${suggested}`]),
-      ...(below ? [`Switch to ${below}`] : []),
-      KEEP,
-      ...(canHandOff ? [NEW_SESSION] : []),
-    ]
-    if (options.length < 2) return { rating }
+  const current = await $.session.model()
+  const suggested = SUGGEST[rating]
+  const strong = STRONG.includes(rating)
+  // ponytail: start_session exists only in the desktop app, so the hand-off is offered there alone
+  const canHandOff = strong && (await $.session.surfaces()).includes('desktop')
+  // A strong rating fits a model ranked at or above its suggestion, or one the mod cannot rank, so it never offers a step down;
+  // lower ratings still offer a cheaper one.
+  const have = rank(current)
+  const fits = strong ? have === undefined || have >= RANK[suggested]! : current.toLowerCase().includes(suggested)
+  // The tier below the suggestion, offered after it and only while it is itself a step up from the current model.
+  const under = STEP_DOWN[rating]
+  const below = under !== undefined && !fits && have !== undefined && have < RANK[under]! ? under : undefined
+  const switches = [...(fits ? [] : [`Switch to ${suggested}`]), ...(below ? [`Switch to ${below}`] : [])]
+  // The guide prefers lowering effort to switching models, so a simple prompt is offered that first; but two or more tiers above
+  // haiku the switch is the far stronger lever, so there it leads.
+  const lower = rating === 'simple' && !fits ? [LOW_EFFORT] : []
+  const far = have !== undefined && have - RANK[suggested]! >= 2
+  const options = [...(far ? [...switches, ...lower] : [...lower, ...switches]), keep(current), ...(canHandOff ? [NEW_SESSION] : [])]
+  if (options.length < 2) return { rating, current }
 
-    const floor = FLOOR[rating] ? ` If it runs here, effort will be at least ${FLOOR[rating]}.` : ''
-    // The rating call already returned the reading; a simple prompt is cheap to misread, so it gets none.
-    const readAs = rating === 'simple' ? undefined : reading
-    // Offered only where the dialog shows anyway, so it adds no question; /refine-prompt covers the rest.
-    const answer = await $.ui.ask(`${readAs ? `Read as: ${readAs}. ` : ''}This prompt looks ${rating}. Keep running it on ${current}?${floor}`, {
+  // The floor is said only where it can change anything: every model's default effort is already at or above medium.
+  const floor = FLOOR[rating] === 'high' ? ' Effort will be at least high.' : ''
+  // The rating call already returned the reading; a simple prompt is cheap to misread, so it gets none.
+  const readAs = rating === 'simple' ? undefined : reading
+  // Offered only where the dialog shows anyway, so it adds no question; /refine-prompt covers the rest.
+  const answer = await $.ui
+    .ask(`${readAs ? `Read as: ${readAs}. ` : ''}Rated ${rating}: ${SIZE[rating]}. You are on ${current}.${floor} Run it how?`, {
       header: 'Model',
       options: canImprove ? [...options, REFINE] : options,
     })
-    return { rating, answer }
-  } catch {
-    return undefined // rating failed or the dialog was dismissed: leave the prompt alone
-  }
+    .catch(() => undefined)
+  return answer === undefined ? { rating, current, dismissed: true } : { rating, current, answer }
 }
 
 export const register: Register = (on, options) => {
@@ -343,6 +415,33 @@ export const register: Register = (on, options) => {
   let busy = false
   // The band's result row after a Refine, shown over the show rule until Done, Restore original or a send.
   let result: { original: string; issues: string[]; plan: boolean; expanded: boolean } | undefined
+
+  /** The main-loop model as the log names it: the override, or the session's own. */
+  const onModel = (current: string) => model ?? current
+
+  /**
+   * Applies the person's answer to a model dialog: the effort the rating sets (or exactly low) and the model the answer names.
+   * Returns the decision to log, and whether the status line changed and needs showing. Touches no engine call itself, so hooks
+   * may call it; the loader lets `$` reach top-level functions alone.
+   */
+  function decide(rating: Rating, current: string, answer: string | undefined): { entry: Decision; status: boolean } {
+    const chose = answer === undefined ? 'none asked' : chosen(answer)
+    const from = onModel(current)
+    // A prompt rated again (the improved one, say) replaces the minimum, so the status is shown afresh.
+    exact = answer === LOW_EFFORT
+    effort = exact ? 'low' : FLOOR[rating]
+    let status = raised
+    raised = false
+    // The keep label names the session's model, so it is never read as free text naming one to switch to.
+    const picked = answer === keep(current) ? undefined : pickedModel(answer)
+    if (picked) {
+      model = picked
+      // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.
+      running = `running ${picked}, not ${current}`
+      status = true
+    }
+    return { entry: { rating, from, to: onModel(current), chose }, status }
+  }
 
   // The refine band: Goal, Workflow and Scope pickers and Refine (or the result row after one), and on the desktop the Run in picker,
   // drawn above whatever else draws the band; a survey holds the band alone.
@@ -481,8 +580,11 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'refine-prompt', description: 'Review a prompt and put an improved one in the prompt box', argumentHint: '<prompt>' })
+    await $.command.register({ name: 'triage-stats', description: 'Show how often each rating led to a model switch' })
     return next(e)
   })
+
+  on('command.run', { command: 'triage-stats' }, async $ => ({ text: tally(await decisions($)) })).catch(() => ({ text: 'The decision log could not be read.' }))
 
   on('command.run', { command: 'refine-prompt' }, async ($, e) => {
     if (!e.args.trim()) return { text: 'Usage: /refine-prompt <prompt>' }
@@ -510,33 +612,26 @@ export const register: Register = (on, options) => {
 
     const rated = await choose($, e, !improved)
     if (rated === undefined) return next(e)
-    const { rating, answer } = rated
+    const { rating, current, answer, dismissed } = rated
+    // Dismissing and handing off change nothing here, so they are logged as chosen and the prompt goes on. Refining is not logged:
+    // the rewrite is rated and logged when it is sent, and one prompt should count once.
+    if (dismissed || answer === NEW_SESSION) {
+      await log($, { rating, from: onModel(current), to: onModel(current), chose: dismissed ? 'dismissed' : NEW_SESSION }).catch(() => undefined)
+    }
+    if (dismissed) return next(e)
     if (answer === NEW_SESSION) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
     if (answer === REFINE && !improved) {
       improved = true
       const reviewed = await improve($, e.text, await (picks ??= loadPicks($)))
-      return reviewed === undefined ? next(e) : { drop: asLine(reviewed) }
+      if (reviewed !== undefined) return { drop: asLine(reviewed) }
+      // No rewrite will come back to be rated, so this is the session's one entry.
+      await log($, { rating, from: onModel(current), to: onModel(current), chose: REFINE }).catch(() => undefined)
+      return next(e)
     }
 
-    // A prompt rated again (the improved one, say) replaces the minimum, so the status is shown afresh.
-    exact = answer === LOW_EFFORT
-    effort = exact ? 'low' : FLOOR[rating]
-    if (raised) {
-      raised = false
-      $.ui.status(line())
-    }
-    // A label or free text typed under "Other", such as "use sonnet"; text naming two models ("not haiku, use opus") is ambiguous, so it switches nothing.
-    const said = answer?.toLowerCase() ?? ''
-    const named = ALIASES.filter(alias => said.includes(alias))
-    // ponytail: any no-word switches nothing, so "no, use opus" is missed too; /model covers that, and a wrong switch is worse
-    const turnedDown = /\b(?:no|not|don't|dont|never|avoid|without)\b/.test(said)
-    const picked = named.length === 1 && !turnedDown ? named[0] : undefined
-    if (picked) {
-      model = picked
-      // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.
-      running = `running ${picked}, not ${await $.session.model()}`
-      $.ui.status(line())
-    }
+    const decided = decide(rating, current, answer)
+    if (decided.status) $.ui.status(line())
+    await log($, decided.entry).catch(() => undefined)
     return next(e)
   }).catch(($, e, next) => next(e)) // a failure here never holds up the prompt
 

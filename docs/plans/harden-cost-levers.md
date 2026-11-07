@@ -1,19 +1,23 @@
 ---
-status: todo
+status: completed
+modified: 2026-11-07
 type: feature
 created: 2026-11-07
 effort: high
 workflow: never
 artifact-url: https://claude.ai/artifact/9zQW8v6yZACGFBkXbP1EF1
-glance: The mod changes which model runs your session based on one cheap classifier call reading one sentence, and keeps no record of whether that helped. After this it logs every decision it makes and stops offering the priciest switch until the session proves it needs one, so the next cost question is answered from a tally instead of from arithmetic.
+glance: The mod changes which model runs your session based on one cheap classifier call reading one sentence, and keeps no record of whether that helped. After this it logs every decision it makes and /triage-stats prints the tally, so the next cost question is answered from a count instead of from arithmetic. The evidence gate on the priciest switch was built, then dropped before landing: its mid-session dialog was judged a workflow cost, and the tally is what will show whether it is needed at all.
 ---
 
 # Plan: Make every model switch either measured or evidence-gated
 
 ## Objective
 
-Give the mod a record of every model and effort decision it makes, and stop it
-offering the most expensive switch on the strength of a single sentence.
+Give the mod a record of every model and effort decision it makes, and a
+command that reads it back, so the question of whether its switches are ever
+taken is answered from data. (The second half of the original objective,
+deferring the most expensive switch until the session proves it is long, was
+built and then dropped: see Decisions.)
 
 ## Context
 
@@ -71,12 +75,13 @@ limitation the README already documents, and this plan does not widen it.
 - P1's log is a single capped array under one store key. `$.store.set` rejects a store over 4 MiB of JSON text in total, so an uncapped log would eventually break every other write the mod makes, including the band's saved picks.
 - P3 and P4 share one main-loop turn counter and ship together. Two counters measuring the same thing would drift.
 - The mid-session dialog is known to work: `refineDraft` already runs `$.ui.ask` from a `$.clock.after` timer, so prompting outside `prompt.submit` needs no new mechanism.
+- Stage three was dropped on 2026-11-07 after it was built and green. Steps 4, 5, 8 and 9 added a main-loop request counter and two dialogs at 30 requests (fable for a `long-running` session, the session's own effort back for a `simple` one). All of it passed its tests, but a dialog that can open mid-task was judged a cost to the development workflow that the log had not yet justified, and the plan's own rollout note said to let the stage-one tally decide stage three. The code is removed; the git history of this branch keeps the working version. Steps 1-3, 6-7 and 10-12 are what landed.
 - No SHIP phase. The objective is to land the change, not to commit and open a pull request from inside the plan; committing stays an explicit user request after `VERIFY` is green.
 
 ## Files
 
-- hooks/register.ts (modified) — the decision log, the option reorder, the turn counter, the deferred and contradicted dialogs
-- hooks/register.test.ts (modified) — failing tests for all four changes, then the regression guards
+- hooks/register.ts (modified) — the decision log, the `/triage-stats` command and the option reorder
+- hooks/register.test.ts (modified) — failing tests for the log, the command and the reorder, then the regression guards
 - evals/rating-prompts.json (modified) — grow from 8 to 40 cases per rating
 - scripts/eval-rating.mjs (modified) — report a per-class Wilson confidence interval beside each percentage
 - README.md (modified) — the `/triage-stats` command, the new dialog timing, and the data the mod now stores
@@ -85,67 +90,65 @@ limitation the README already documents, and this plan does not widen it.
 
 ### Phase: RED
 
-1. Add failing tests in hooks/register.test.ts asserting that a rated first prompt appends one entry holding the rating, the model before and after, the chosen option and the turn count, and that the array never exceeds its cap. Why: the log is the only new persistent state and an uncapped one would eventually break every other store write. Verify: `claude plugin test .` exits non-zero on these tests with an assertion failure naming the missing store key, not an import error.
-2. Add a failing test that `/triage-stats` is registered on session start and prints a tally naming each rating and how often a switch was accepted. Why: a log nobody can read answers no question, so the command is part of the deliverable rather than a follow-up. Verify: `claude plugin test .` fails reporting the command absent from the registered list.
-3. Add a failing test that a `simple` prompt whose suggested model is two or more tiers cheaper lists the model switch before `Keep model, effort low`, and that a one-tier gap keeps the present order. Why: pins both halves of the reorder so the one-tier case cannot regress silently while the two-tier case is fixed. Verify: `claude plugin test .` fails on the two-tier case with the actual option array printed, while the one-tier case passes.
-4. Add failing tests that a `long-running` rating offers no fable switch on the first prompt, and that it offers one once main-loop turns pass the threshold on the original model. Why: this is the behaviour change the review's largest finding asks for, and both halves must hold or the suggestion is merely lost. Verify: `claude plugin test .` fails showing a fable option still present in the first-prompt dialog.
-5. Add a failing test that a session rated `simple` which passes the turn threshold drops the lowered-effort override and offers the dialog exactly once. Why: the exactly-once part is what stops a long session asking on every subsequent turn. Verify: `claude plugin test .` fails on the override still being applied after the threshold.
+1. [x] Add failing tests in hooks/register.test.ts asserting that a rated first prompt appends one entry holding the rating, the model before and after, the chosen option and the turn count, and that the array never exceeds its cap. Why: the log is the only new persistent state and an uncapped one would eventually break every other store write. Verify: `claude plugin test .` exits non-zero on these tests with an assertion failure naming the missing store key, not an import error.
+2. [x] Add a failing test that `/triage-stats` is registered on session start and prints a tally naming each rating and how often a switch was accepted, split into switches up to a pricier model and down to a cheaper one. Why: a log nobody can read answers no question, so the command is part of the deliverable rather than a follow-up. Verify: `claude plugin test .` fails reporting the command absent from the registered list.
+3. [x] Add a failing test that a `simple` prompt whose suggested model is two or more tiers cheaper lists the model switch before `Keep model, effort low`, and that a one-tier gap keeps the present order. Why: pins both halves of the reorder so the one-tier case cannot regress silently while the two-tier case is fixed. Verify: `claude plugin test .` fails on the two-tier case with the actual option array printed, while the one-tier case passes.
+4. [x] (Dropped, see Decisions.) Add failing tests that a `long-running` rating offers no fable switch on the first prompt, and that it offers one once main-loop turns pass the threshold on the original model. Why: this is the behaviour change the review's largest finding asks for, and both halves must hold or the suggestion is merely lost. Verify: `claude plugin test .` fails showing a fable option still present in the first-prompt dialog.
+5. [x] (Dropped, see Decisions.) Add a failing test that a session rated `simple` which passes the turn threshold drops the lowered-effort override and offers the dialog exactly once. Why: the exactly-once part is what stops a long session asking on every subsequent turn. Verify: `claude plugin test .` fails on the override still being applied after the threshold.
 
 ### Phase: GREEN
 
-6. Implement the capped decision log and the `/triage-stats` command in hooks/register.ts, writing through `$.store` under one key. Why: measurement has to exist before any later change to the mod can be judged by anything but argument. Verify: re-run `claude plugin test .`; the step 1 and 2 tests pass and no previously passing test fails.
-7. Reorder the `simple` prompt's dialog options when `rank(current)` exceeds the suggestion's rank by two or more. Why: at a 35x price gap the model switch dominates the effort option, so the stronger lever belongs in the first position. Verify: re-run `claude plugin test .`; the step 3 tests pass and the existing simple-prompt option-order test still passes.
-8. Add a main-loop turn counter in the `turn.step` hook and use it to defer the fable suggestion to a named threshold constant. Why: a turn count is evidence the task really is long-running, where the first sentence was only a prediction. Verify: re-run `claude plugin test .`; the step 4 tests pass.
-9. Use the same counter to drop a `simple` rating's lowered-effort override past the threshold and offer the dialog once. Why: reuses the counter rather than adding a second measure of the same thing. Verify: re-run `claude plugin test .`; the step 5 tests pass. If tests still fail after 8 iterations, stop and report the exact blocker — the failing assertion, the last diff tried, and what was ruled out. Do not report success.
+6. [x] Implement the capped decision log and the `/triage-stats` command in hooks/register.ts, writing through `$.store` under one key. Why: measurement has to exist before any later change to the mod can be judged by anything but argument. Verify: re-run `claude plugin test .`; the step 1 and 2 tests pass and no previously passing test fails.
+7. [x] Reorder the `simple` prompt's dialog options when `rank(current)` exceeds the suggestion's rank by two or more. Why: at a 35x price gap the model switch dominates the effort option, so the stronger lever belongs in the first position. Verify: re-run `claude plugin test .`; the step 3 tests pass and the existing simple-prompt option-order test still passes.
+8. [x] (Dropped, see Decisions.) Add a main-loop turn counter in the `turn.step` hook and use it to defer the fable suggestion to a named threshold constant. Why: a turn count is evidence the task really is long-running, where the first sentence was only a prediction. Verify: re-run `claude plugin test .`; the step 4 tests pass.
+9. [x] (Dropped, see Decisions.) Use the same counter to drop a `simple` rating's lowered-effort override past the threshold and offer the dialog once. Why: reuses the counter rather than adding a second measure of the same thing. Verify: re-run `claude plugin test .`; the step 5 tests pass. If tests still fail after 8 iterations, stop and report the exact blocker — the failing assertion, the last diff tried, and what was ruled out. Do not report success.
 
 ### Phase: VERIFY
 
-10. Run the full suite and the plugin validator. Why: the repo has no separate lint or typecheck command, so these two are the whole gate and both must be observed, not assumed. Verify: `claude plugin test .` reports 0 fail and `claude plugin validate .` prints validation passed.
-11. Grow evals/rating-prompts.json to 40 cases per rating and extend scripts/eval-rating.mjs to print a Wilson 95% interval beside each per-class percentage. Why: `complex` currently scores 5/8, an interval of 31-86%, so no later claim about the rating is falsifiable at the present sample size. Verify: `node scripts/eval-rating.mjs` prints 160 cases and an interval on every class line, and the `complex` interval is narrower than 31-86%.
-12. Update README.md with the `/triage-stats` command, the new dialog timing for `long-running` and `simple`, and the decision log under the Data section. Why: the README documents every behaviour and limit, and three of its claims stop being true at step 9. Verify: `grep -q 'triage-stats' README.md` exits 0 and every changed README line matches the behaviour the tests now assert.
+10. [x] Run the full suite and the plugin validator. Why: the repo has no separate lint or typecheck command, so these two are the whole gate and both must be observed, not assumed. Verify: `claude plugin test .` reports 0 fail and `claude plugin validate .` prints validation passed.
+11. [x] Grow evals/rating-prompts.json to 40 cases per rating and extend scripts/eval-rating.mjs to print a Wilson 95% interval beside each per-class percentage. Why: `complex` currently scores 5/8, an interval of 31-86%, so no later claim about the rating is falsifiable at the present sample size. Verify: `node scripts/eval-rating.mjs` prints 160 cases and an interval on every class line, and the `complex` interval is narrower than 31-86%.
+12. [x] Update README.md with the `/triage-stats` command, the new dialog timing for `long-running` and `simple`, and the decision log under the Data section. Why: the README documents every behaviour and limit, and three of its claims stop being true at step 9. Verify: `grep -q 'triage-stats' README.md` exits 0 and every changed README line matches the behaviour the tests now assert.
 
 ## Tests
 
 Tier 1 — This plan changes application code
-- Objective: the mod records every rating decision and offers no fable switch on a first prompt. File: hooks/register.test.ts; Type: smoke; Asserts: a rated session appends one capped log entry and a `long-running` first prompt's dialog contains no fable option; Run: `claude plugin test .`
+- Objective: the mod records every rating decision and `/triage-stats` reads it back. File: hooks/register.test.ts; Type: smoke; Asserts: a rated session appends one capped log entry naming the rating, the models and the choice, and `/triage-stats` prints a row for every rating; Run: `claude plugin test .`
 - Unit: the decision log. File: hooks/register.test.ts; Targets: the store write in `choose()`; Key cases: one entry per rated session, the cap holds at its limit, a failed store write does not block the prompt
 - Unit: dialog option order. File: hooks/register.test.ts; Targets: the `options` array in `choose()`; Key cases: two-tier gap puts the switch first, one-tier gap keeps the present order, no gap offers neither
-- Unit: the turn threshold. File: hooks/register.test.ts; Targets: the `turn.step` counter; Key cases: below threshold offers nothing, crossing it offers once, crossing again offers nothing further, subagent steps never count
 - Integration: eval harness reporting. File: scripts/eval-rating.mjs; Targets: the per-class summary; Key cases: 40 cases per class counted, an interval printed on every class line
 
 ## Acceptance Criteria
 
-- [ ] `claude plugin test .` exits 0 with the new tests included, and `claude plugin validate .` passes
-- [ ] A rated session leaves exactly one decision-log entry naming the rating, the model before and after, and the chosen option
-- [ ] The decision log never holds more than its cap, proven by a test that writes past it
-- [ ] `/triage-stats` prints a tally covering all four ratings and how often a switch was accepted
-- [ ] A `simple` prompt two or more tiers above its suggestion lists the model switch first; a one-tier gap is unchanged
-- [ ] A `long-running` first prompt offers no fable switch, and one is offered after the turn threshold on the original model
-- [ ] A `simple` session past the threshold drops the lowered-effort override and asks exactly once
-- [ ] `node scripts/eval-rating.mjs` reports 160 cases with a confidence interval on every class line
-- [ ] README.md describes `/triage-stats`, the new dialog timing, and what the decision log stores
+- [x] `claude plugin test .` exits 0 with the new tests included, and `claude plugin validate .` passes
+- [x] A rated session leaves exactly one decision-log entry naming the rating, the model before and after, and the chosen option
+- [x] The decision log never holds more than its cap, proven by a test that writes past it
+- [x] `/triage-stats` prints a tally covering all four ratings and how often a switch was accepted, split into up (pricier) and down (cheaper) using the logged model before and after
+- [x] A `simple` prompt two or more tiers above its suggestion lists the model switch first; a one-tier gap is unchanged
+- [x] `node scripts/eval-rating.mjs` reports 160 cases with a confidence interval on every class line
+- [x] README.md describes `/triage-stats`, the new dialog timing, and what the decision log stores
 
 ## Verification
 
 Run `claude plugin test .` and confirm it reports 0 fail with every test above
 present, then `claude plugin validate .` and confirm it prints validation
-passed. Both must be observed, not inferred: the suite drives a mocked engine
+passed. Observed 2026-11-07 after stage three was removed: 104 pass, 0 fail;
+validation passed. Three runs of `node scripts/eval-rating.mjs` on the same
+rubric printed 160 cases with `complex` at 30, 35 and 34 of 40, so the
+run-to-run noise is about five cases and a rubric change must beat that. Both must be observed, not inferred: the suite drives a mocked engine
 and prints a sandbox denial for `api.anthropic.com` on every run, which is
 expected noise rather than a failure.
 
-Then exercise the objective by hand in a real session. Load the mod with
-`claude --plugin-dir .`, send a first prompt that rates `long-running` such as
-"migrate the whole codebase from Express to Fastify", and confirm the dialog
-offers no fable switch. Keep working past the turn threshold on the session's
-own model and confirm the switch is then offered once and not again. Run
-`/triage-stats` and confirm the tally names that session's rating and the
-option chosen. Finally run `node scripts/eval-rating.mjs` and confirm it prints
-160 cases with an interval on every class line.
+The real-session walk-through was observed in part: with the mod loaded
+through `claude --plugin-dir .`, a first prompt was rated and the session was
+switched to sonnet, the status line read `running sonnet, not
+claude-opus-5-5`, and `node scripts/eval-rating.mjs` printed 160 cases with an
+interval on every class line. `/triage-stats` was exercised through the mocked
+engine, not by hand.
 
 ## Next Steps
 
 - Tune the rating rubric against the grown eval
-  Only becomes falsifiable once step 11 lands; at 8 cases per class no rubric change can be measured.
+  Step 11 landed, but three runs of the same rubric scored `complex` 30, 35 and 34 of 40: the noise floor is about five cases, so only a change that clears it counts, and the baseline should be the median of several runs.
   ```text
   In the prompt-triage repo, the eval at evals/rating-prompts.json now holds 40 cases
   per rating and scripts/eval-rating.mjs reports per-class Wilson intervals. Establish a
@@ -168,8 +171,8 @@ option chosen. Finally run `node scripts/eval-rating.mjs` and confirm it prints
   and update the README. Verify: `claude plugin test .` exits 0 and
   `claude plugin validate .` passes.
   ```
-- Wish list: set the turn threshold from the recorded data
-  Needs weeks of real `/triage-stats` output before it is more than a guess.
+- Wish list: revive the evidence gate once the tally justifies it
+  Stage three (the request counter and the dialogs at a threshold) is in this branch's history. Weeks of real `/triage-stats` output would show whether the fable suggestion is ever taken, which decides between reviving the gate and deleting the suggestion.
 
 ## Unresolved Questions
 

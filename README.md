@@ -21,9 +21,12 @@ desktop app it can also hand a complex or long-running task to a new session.
      codebase-wide migration or a port to another framework.
 2. Each rating suggests a model: simple to `haiku`, moderate to `sonnet`,
    complex to `opus`, long-running to `fable`. When the suggestion differs
-   from the model you are on, a dialog asks whether to switch or keep the
-   current model. Under "Other" you can type a model name, such as
-   `use sonnet` or `use fable`.
+   from the model you are on, a dialog says the rating and what it would
+   take, names the model you are on, and asks how to run it, for example
+   `Rated moderate: a sonnet-sized task. You are on claude-opus-5-5. Run it
+   how?` with **Switch to sonnet**, **Keep claude-opus-5-5** and **Refine
+   prompt**. Under "Other" you can type a model name, such as `use sonnet`
+   or `use fable`.
 
    A `long-running` rating also offers **Switch to opus** under the `fable`
    suggestion, whenever opus is itself a step up from your current model.
@@ -35,7 +38,9 @@ desktop app it can also hand a complex or long-running task to a new session.
 3. For a `simple` prompt the dialog's first option is **Keep model, effort
    low**: it keeps your model and runs the main conversation at effort `low`,
    since lowering effort is often a better lever than switching models. The
-   switch to `haiku` is still offered after it.
+   switch to `haiku` is offered after it, except when your model is two or
+   more tiers above `haiku` (Opus, Fable or Mythos), where the switch is the
+   far larger saving and so comes first.
 4. In the desktop app, a `complex` or `long-running` rating also offers
    **Open in a new session**. Choosing it adds context containing an instruction asking Claude to
    start a fresh session with `start_session` instead of doing the task in
@@ -70,6 +75,8 @@ desktop app it can also hand a complex or long-running task to a new session.
    the prompt unchanged.
 8. Each rating also sets a minimum effort: none for simple, `medium` for
    moderate, `high` for complex and long-running. See [Effort](#effort).
+9. Every decision is written to a log in the mod's store, and `/triage-stats`
+   prints the tally. See [The decision log](#the-decision-log).
 
 The switch applies to the main conversation's requests for the rest of the
 session; subagents keep their own models. While it is in effect the status
@@ -83,9 +90,11 @@ both. Running `/model` yourself ends the override.
 
 After the first prompt is rated `moderate`, `complex` or `long-running`, any
 main-loop request whose effort is below the minimum is sent at the minimum
-instead. Effort that is already at or above it is left alone. The dialog, when
-shown, says what the minimum is if the prompt runs in this session; it applies
-whichever model you choose, and also when no dialog is shown.
+instead. Effort that is already at or above it is left alone. The dialog for
+a `complex` or `long-running` prompt says `Effort will be at least high`; the
+`medium` minimum is not mentioned, since no model's default effort is below
+it. The minimum applies whichever model you choose, and also when no dialog
+is shown.
 
 The minimums guard against an effort lowered by hand. At the Claude API's
 default effort (`high` on Fable 5.1 and Sonnet 5.5, `medium` on Opus 5.5 and
@@ -109,6 +118,24 @@ was too low once that request is sent. From then on the status line shows
 `effort raised to <level>`. The effort setting itself still shows the
 session's own value. Running `/effort` yourself ends the minimum or the
 lowered effort; any model override stays.
+
+## The decision log
+
+Each time the mod rates a first prompt it appends one entry to a log in its
+store: the rating, the main-loop model before and after, and the option
+chosen (or `none asked` when no dialog was shown, `dismissed`, or **Open in
+a new session**). Free text typed under "Other" is recorded as `other`, plus
+the model alias it named if it named one, never the text itself. Choosing
+**Refine prompt** logs nothing while the review succeeds; the rewrite is
+logged when you send it, so one prompt counts once. If the review fails, the
+original prompt is sent and that session is logged as **Refine prompt**. No prompt text is logged, and the log keeps the
+newest 200 entries. `/triage-stats` prints it as a table, one row per
+rating, with how many sessions it rated, how many of those changed model
+tier, and how many of those changes went up to a pricier tier or down to a
+cheaper one. That is the first record of whether a suggestion is ever taken,
+so the question of whether the rating call pays for itself can be answered
+from a count rather than from arithmetic. Neither the log nor the command
+makes a model request.
 
 ## Improving a prompt
 
@@ -194,20 +221,21 @@ prompt, so the model dialog does not offer **Refine prompt** again for it.
 
 ## Hooks
 
-The mod registers nine hooks in `hooks/register.ts`. `prompt.submit` and
+The mod registers ten hooks in `hooks/register.ts`. `prompt.submit` and
 `command.run` are also the names of calls, so these hooks run whenever a
-prompt is submitted or `/model`, `/effort` or `/refine-prompt` is run, whether you do it or
+prompt is submitted or `/model`, `/effort`, `/refine-prompt` or `/triage-stats` is run, whether you do it or
 other code (the app, another mod) does. The mod never makes either call
 itself.
 
 | Hook | When it acts | What it may change |
 | --- | --- | --- |
-| `session.start` | Each session start. | Registers the `/refine-prompt` command. |
+| `session.start` | Each session start. | Registers the `/refine-prompt` and `/triage-stats` commands. |
 | `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, unless a survey holds the band. | Draws the refine band (Goal, Workflow and Scope pickers and **Refine**, or the result row after a refine) when the draft meets the `band` setting, and in the desktop app the **Run in** picker, above whatever else draws the band. **Refine** puts its rewrite in the prompt box and **Restore original** puts the draft back; nothing else changes until you send. |
 | `prompt.edit`, `prompt.change` | Each change to the prompt box. | Change nothing. Redraw the band when the draft starts or stops meeting the `band` setting. |
-| `prompt.submit` | On any prompt that is not a slash command, a meta prompt or part of a running turn while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
+| `prompt.submit` | On any prompt that is not a slash command, a meta prompt or part of a running turn while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given with the band's picks, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
+| `command.run` (`/triage-stats` only) | Each run of `/triage-stats`. | Reads the decision log from the store and prints the tally. Changes nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
 | `command.run` (`/effort` only) | Each run of `/effort`. | Leaves the command unchanged. Clears the effort minimum or lowered effort and its part of the status line. |
 
@@ -243,7 +271,8 @@ request returns the rating and, for a `moderate`, `complex` or `long-running`
 prompt, the one-line restatement, so the dialog never waits on a second call.
 A `simple` prompt gets the label only. Each **Refine prompt**,
 `/refine-prompt` or band **Refine** adds one `haiku` request, and a second when
-you answer its questions. The band makes no request while you type.
+you answer its questions. The band makes no request while you type. `/triage-stats` makes no model
+request at all.
 
 ## Limits
 
@@ -267,7 +296,12 @@ you answer its questions. The band makes no request while you type.
   offered `fable` or nothing else, and one on Fable, Mythos or an unrecognized
   name is offered neither.
 - The override and the effort minimum live in the mod's memory. If the mod
-  reloads, the session goes back to its own model and effort.
+  reloads, the session goes back to its own model and effort. The decision
+  log is in the store and survives.
+- The decision log is one list that every session appends to without a lock,
+  since the store has no atomic update. Two sessions rating their first
+  prompt within the same few milliseconds can lose one entry. This is
+  accepted: the log is a tally, and a missing row costs nothing else.
 - Whether a request takes effort is read from the session's model. If you
   switch to a model that takes no effort setting, the status line can still
   say effort was raised, though none is sent; if the session's own model takes
@@ -291,8 +325,11 @@ through `$.model.complete` for the review, and sent again with your answers
 when you answer its questions. The path check reads only whether
 files exist, not their contents. The mod does not persist prompt data, the
 model override or the effort minimum; they are held in memory for the session.
-The band's Goal, Workflow and Scope picks, and nothing else, are saved in the
-mod's store across sessions. It writes no
+Two things are saved in the mod's store across sessions: the band's Goal,
+Workflow and Scope picks, and the decision log under the key `decisions`, a
+list of at most 200 entries each holding the rating, the main-loop model
+before and after and the option chosen. No prompt text is logged. `/triage-stats` reads it; nothing else
+does. It writes no
 files and makes no network requests of its own. The
 only context it adds is the new-session instruction described above, and only
 when you choose that option.
@@ -307,12 +344,15 @@ claude plugin test .           # run hooks/register.test.ts
 
 ### Evaluating the rating
 
-`evals/rating-prompts.json` holds 32 realistic first prompts, 8 per rating,
+`evals/rating-prompts.json` holds 160 realistic first prompts, 40 per rating,
 each labeled with the rating it should get. `scripts/eval-rating.mjs` imports
 the rubric (`RATER`) and the reply parser (`parseRating`) from
 `hooks/register.ts`, rates each prompt through `claude -p` at `haiku` and
-effort `low`, and prints per-rating accuracy, a confusion table and the number
-of replies that named no rating. `--baseline` scores bare labels with no
+effort `low`, and prints per-rating accuracy with a Wilson 95% confidence
+interval beside each percentage, a confusion table and the number of replies
+that named no rating. The interval is the point: at the earlier 8 cases per
+rating, `complex` scored 5/8, an interval of 31-86%, too wide to tell a
+rubric change from noise; at 40 the same score would read 47-76%. `--baseline` scores bare labels with no
 definitions instead, for comparison. It needs Node 24 and a signed-in Claude
 Code, not an API key, and it turns off user settings, MCP servers and skills so
 an installed prompt-triage cannot rate the eval's own prompts. The CLI adds its
@@ -327,7 +367,7 @@ node scripts/eval-rating.mjs --baseline
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the nine hooks and the `/refine-prompt` command. |
+| `hooks/register.ts` | All of the mod's logic: the ten hooks and the `/refine-prompt` and `/triage-stats` commands. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
 | `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`. |
