@@ -5,6 +5,9 @@ Status: nothing here is implemented. Written 2026-11-07 against the mod at
 [docs/plans/sessions/add-fable-step-down-session.md](../plans/sessions/add-fable-step-down-session.md).
 Prices quoted are Anthropic API list prices as of 2026-10-06.
 
+Published as a page at https://claude.ai/artifact/8DVAFtXE1Cjtti2vkgjKX1 — pass
+that URL back to republish to it rather than creating a second page.
+
 ## Summary
 
 The mod's four open findings are one problem wearing four hats: **its most
