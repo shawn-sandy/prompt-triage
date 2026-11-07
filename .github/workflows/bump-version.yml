@@ -31,6 +31,7 @@ jobs:
         with:
           app-id: ${{ vars.BUMP_APP_ID }}
           private-key: ${{ secrets.BUMP_APP_PRIVATE_KEY }}
+          permission-contents: write # the token needs only checkout, push and release
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the subjects of every pushed commit are read below
