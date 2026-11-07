@@ -79,7 +79,9 @@ const PICKERS = {
 type Picker = keyof typeof PICKERS
 type Picks = { [K in Picker]: keyof (typeof PICKERS)[K]['options'] & string }
 // A band row: a cell between controls, wrapping to a second row where the band is too narrow for every pick's label.
-const ROW = { columnGap: 1, flexWrap: 'wrap' } as const
+// The step name in rowGap keeps a wrapped line off the buttons above it: the desktop draws a step as 8px (its gap-sm token), where a bare
+// 0 left Run in flush against them; the terminal draws a step as 0 rows down, so its band stays as tall as before.
+const ROW = { columnGap: 1, rowGap: 'sm', flexWrap: 'wrap' } as const
 const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
 
 /** The picks saved in the mod's store, each one that is missing or not an option at its default. */

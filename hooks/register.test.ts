@@ -1056,3 +1056,22 @@ test('focusing the band starts on Refine, so r or Enter refines at once', async 
     expect(focused.map(e => e.props.key)).toEqual(['refine'])
   }
 })
+
+// A row that wraps (the band is too narrow for every control) needs a gap between its lines: on the desktop the buttons are taller than a text line,
+// and with no gap the wrapped line, such as Run in, sat flush against the buttons above it.
+for (const surface of SURFACES) {
+  test(`a wrapping band row keeps a gap between its lines, idle and after a Refine, on the ${surface}`, async ($, on) => {
+    engine(on, { draft: LONG, review: REVIEWED, surfaces: ['desktop'] })
+    const ui = await band($, surface)
+    const ungapped: string[] = []
+
+    for (const stage of ['idle', 'result']) {
+      if (stage === 'result') await refine(ui)
+      const wrapping = (await ui.findAll({ type: 'Box' })).filter(box => box.props.flexWrap === 'wrap')
+      // At least one wrapping row is drawn in each stage, so the loop below cannot pass by finding none.
+      expect(wrapping.length).toBeGreaterThan(0)
+      for (const box of wrapping) if (!box.props.rowGap) ungapped.push(`${stage} ${String(box.props.key ?? 'row')}`)
+    }
+    expect(ungapped).toEqual([])
+  })
+}
