@@ -41,7 +41,10 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           current=$(jq -r .version .claude-plugin/plugin.json)
-          if git log --format=%s "$BEFORE"..HEAD | grep -qE '^feat(\([^)]*\))?:'; then
+          # Scan from the current version's release tag, so commits from runs that failed still count.
+          since="prompt-triage--v$current"
+          git rev-parse -q --verify "refs/tags/$since" >/dev/null || since="$BEFORE"
+          if git log --format=%s "$since"..HEAD | grep -qE '^feat(\([^)]*\))?:'; then
             next=$(echo "$current" | awk -F. -v OFS=. '{ $2++; $3 = 0; print }')
           else
             next=$(echo "$current" | awk -F. -v OFS=. '{ $NF++; print }')
