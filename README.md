@@ -38,7 +38,9 @@ desktop app it can also hand a complex or long-running task to a new session.
    picker in the band above the prompt input. Set it to **New session** and
    press Enter: the prompt is sent with the same instruction, with no rating
    and no model dialog, since the new session rates its own first prompt. The
-   pick applies to that one send, then reads **This session** again. If the
+   pick applies to that one send, then reads **This session** again. A prompt
+   typed while Claude is still working runs in this session and leaves the
+   pick armed for your next send. If the
    desktop app has detached by the time you send, the prompt runs in this
    session and a toast says why. The terminal draws no Run in picker.
 

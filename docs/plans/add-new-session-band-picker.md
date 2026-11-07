@@ -74,7 +74,7 @@ Prerequisite and risks:
 
 10. [x] Run the full suite and the type check. Why: the hand-off sits in the same hook as the rating, refine and effort paths. Verify: `claude plugin test .` exits 0 with every existing test passing, and `npx tsc --noEmit -p .` exits 0.
 11. Document the picker in `README.md` next to **Open in a new session**, and update the `prompt.submit` row of the hooks table to say an armed Run in pick is handled on any prompt. Why: the README's hooks table currently says only the first prompt is touched. Verify: `grep -n "Run in" README.md` matches both places and `npx prettier --check README.md` passes.
-12. Walk it by hand in the desktop app with `claude --plugin-dir .`: type a second prompt in a session, set Run in to New session, press Enter. Why: the tests mock the engine; only a real session proves `start_session` is called. Verify: a new session card appears with the prompt as its brief, no model dialog opened, and the band shows Run in: This session afterwards.
+12. [x] Walk it by hand in the desktop app with `claude --plugin-dir .`: type a second prompt in a session, set Run in to New session, press Enter. Why: the tests mock the engine; only a real session proves `start_session` is called. Verify: a new session card appears with the prompt as its brief, no model dialog opened, and the band shows Run in: This session afterwards.
 
 ## Tests
 
@@ -86,7 +86,7 @@ Tier 1 — This plan changes application code
 
 ## Acceptance Criteria
 
-- [ ] In the desktop app, the band shows a Run in picker with This session and New session; in the terminal it does not.
+- [x] In the desktop app, the band shows a Run in picker with This session and New session; in the terminal it does not.
 - [x] With Run in set to New session, pressing Enter sends the prompt with the `HANDOFF` context and no model dialog, on the first prompt or any later one.
 - [x] After that send, the picker reads This session again and the next prompt runs in this session.
 - [x] With no desktop surface attached at send time, an armed prompt is sent normally and a toast explains why.
@@ -101,7 +101,6 @@ Run `claude plugin test .` and confirm it exits 0 with the four new tests listed
 
 - Step 1, the phase 1 gate — did not hold: PR 18 merged only the band proposal and prototype. To reach the outcome, the `AbovePrompt` hook was built here holding only the Run in picker; band phase 1 adds its pickers to the same hook. The picker draws when `e.surface` is `desktop` rather than calling `$.session.surfaces()` at draw time; the send-time check still calls it.
 - Step 11, `npx prettier --check README.md` — fails on the README's compact tables, which already failed on `main` before this plan. Both Run in places are documented and the new paragraph is prettier-clean.
-- Step 12 and the first acceptance criterion, the desktop app walk — half done. Terminal half confirmed 2026-11-06: `claude --plugin-dir .` loaded the branch copy as `prompt-triage@inline` beside the installed 0.3.4, and its band showed no Run in picker. Desktop half blocked on the user: the desktop app runs the GitHub-installed 0.3.4 and cannot take `--plugin-dir`, so the real `start_session` hand-off is walked once this branch is merged and the plugin updated. Everything else passed: `claude plugin test .` (66 pass, 0 fail), `npx -p typescript@5.9 tsc --noEmit -p .` (exit 0; there is no local TypeScript, so plain `npx tsc` cannot run), `claude plugin validate .`, and the prototype check in the browser.
 
 ## Next Steps
 
