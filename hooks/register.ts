@@ -182,7 +182,8 @@ async function review(
     ...new Set(
       s
         .split(/\s+/)
-        .map(t => t.replace(/^[`'"(<\[]+|[`'")>\],.:;!?]+$/g, ''))
+        // The lookbehind starts the trailing run only at its first character; without it a long run not at the end is rescanned from every position.
+        .map(t => t.replace(/^[`'"(<\[]+|(?<![`'")>\],.:;!?])[`'")>\],.:;!?]+$/g, ''))
         .filter(t => PATH.test(t.replaceAll('*', 'x')) && !t.includes('//')),
     ),
   ]

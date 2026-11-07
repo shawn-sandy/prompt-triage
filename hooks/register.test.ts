@@ -381,6 +381,16 @@ test('/refine-prompt with no prompt reviews nothing', async ($, on) => {
   expect(result.text).toBeTruthy()
 })
 
+test('/refine-prompt strips a long run of trailing punctuation in linear time', async ($, on) => {
+  const seen = engine(on, { turns: 3, review: REVIEWED })
+
+  // A run of closing punctuation that ends in a letter made the trailing-strip regex retry from every position: 80k took ~4.5 s.
+  const started = performance.now()
+  await command($, 'refine-prompt', `${')'.repeat(80_000)}x`)
+  expect(performance.now() - started).toBeLessThan(1000)
+  expect(seen.filled).toEqual(['Redesign auth in api, web and admin; done when tests pass.'])
+})
+
 const QUESTION = '<question>\nWhich files should the review cover?\n- Hook code\n- Whole repo\n</question>\n'
 const ASKS = `<issues>\n- Placeholders left unfilled\n</issues>\n${QUESTION}<prompt>Review the workflow.</prompt>`
 const ANSWERED = '<issues>\n</issues>\n<prompt>Review hooks/register.ts.</prompt>'
