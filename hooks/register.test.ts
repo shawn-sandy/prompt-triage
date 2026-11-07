@@ -16,7 +16,7 @@ type Setup = {
   exists?: boolean | string[]
   /** Whether the prompt box takes the rewrite; undefined takes it. */
   isFilled?: boolean
-  /** The restater's reply; undefined fails the call, and THROW rejects it. */
+  /** The restatement the rater adds on a second line under its label; none adds no line. */
   restate?: string
 }
 
@@ -36,7 +36,9 @@ const take = (v: string | string[] | undefined) => (Array.isArray(v) ? v.shift()
 function engine(on: On, s: Setup) {
   const asked: string[][] = []
   const questions: string[] = []
-  const restated: string[] = []
+  /** How many model.complete calls had happened when each dialog opened. */
+  const completesAtAsk: number[] = []
+  let completes = 0
   const submitted: PromptSubmitInput[] = []
   const steps: TurnStepInput[] = []
   const status: (string | undefined)[] = []
@@ -56,6 +58,7 @@ function engine(on: On, s: Setup) {
   })
   on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => {
     const q = e.questions[0]!
+    completesAtAsk.push(completes)
     asked.push(q.options.map(o => o.label))
     questions.push(q.question)
     const answer = take(s.answer)
@@ -76,16 +79,17 @@ function engine(on: On, s: Setup) {
   })
   on('command.run', () => ({ text: '' }))
   on('model.complete', (_$, e) => {
-    // The rater, the restater and the reviewer share this call; each one's system prompt tells them apart.
+    completes++
+    // The rater and the reviewer share this call; each one's system prompt tells them apart.
     const rating = e.system?.startsWith('You rate') ?? false
-    const restating = e.system?.startsWith('You restate') ?? false
     if (rating) ratings.push(e)
-    else if (restating) restated.push(e.prompt)
     else {
       reviewed.push(e.prompt)
       reviews.push(e)
     }
-    const text = rating ? ('rating' in s ? s.rating : 'complex') : restating ? s.restate : take(s.review)
+    // The rater's label is on the first line and its restatement, when it gives one, on the second.
+    const label = 'rating' in s ? s.rating : 'complex'
+    const text = rating ? (s.restate && label && label !== THROW && label !== TIMEOUT ? `${label}\n${s.restate}` : label) : take(s.review)
     if (text === THROW) throw new Error('connection dropped')
     if (text === TIMEOUT) return { value: { isAnswered: false, reason: 'aborted', usage: USAGE } }
     return {
@@ -102,7 +106,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { asked, questions, submitted, steps, status, filled, reviewed, reviews, restated, ratings, classified: () => classified }
+  return { asked, questions, submitted, steps, status, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -468,39 +472,64 @@ test("/model after a raise keeps the effort part of the status line", async ($, 
   expect(seen.status.at(-1)).toBe('effort raised to high')
 })
 
-test('the model dialog shows a one-line restatement of a complex prompt', async ($, on) => {
-  const seen = engine(on, { answer: 'Keep current model', restate: 'Redesign auth across three services.\nA second line.' })
+test('a complex prompt makes exactly one model.complete call before the dialog, rating and restating together', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep current model', restate: 'Redesign auth across three services.' })
 
   await submit($, 'Redesign the auth layer across three services')
-  expect(seen.restated.length).toBe(1)
-  expect(seen.questions[0]).toContain('Redesign auth across three services')
-  expect(seen.questions[0]).not.toContain('A second line')
-  expect(seen.questions[0]).toContain('looks complex')
+  expect(seen.completesAtAsk).toEqual([1])
+  expect(seen.ratings.length).toBe(1)
+  expect(seen.reviews.length).toBe(0)
+  expect(seen.questions[0]).toMatch(/^Read as: Redesign auth across three services\. This prompt looks complex/)
 })
 
-for (const [how, restate] of [['failed', undefined], ['rejected', THROW]] as const) {
-  test(`a ${how} restatement still shows the dialog without one`, async ($, on) => {
-    const seen = engine(on, { answer: 'Keep current model', ...(restate ? { restate } : {}) })
-    await submit($, 'Redesign the auth layer')
-    expect(seen.restated.length).toBe(1)
-    expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Refine prompt']])
-    expect(seen.questions[0]).toMatch(/^This prompt looks complex/)
-    expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
-  })
-}
+test('only the restatement\'s first line is shown, and a long one is cut', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep current model', restate: `${'word '.repeat(40)}\nA second line.` })
 
-test('a simple prompt is not restated', async ($, on) => {
+  await submit($, 'Redesign the auth layer')
+  expect(seen.questions[0]).not.toContain('A second line')
+  expect(seen.questions[0]).toContain('…')
+  expect(seen.questions[0]!.indexOf('This prompt looks')).toBeLessThan(140)
+})
+
+test('a restatement that uses a rating word does not change the rating', async ($, on) => {
+  const seen = engine(on, { rating: 'moderate', model: 'claude-opus-5-5', answer: 'Keep current model', restate: 'Untangle the complex retry logic.' })
+
+  await submit($, 'Untangle the retry logic')
+  expect(seen.questions[0]).toContain('This prompt looks moderate')
+})
+
+test('a rating reply with no restatement still shows the dialog without one', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep current model' })
+  await submit($, 'Redesign the auth layer')
+  expect(seen.completesAtAsk).toEqual([1])
+  expect(seen.asked).toEqual([['Switch to opus', 'Keep current model', 'Refine prompt']])
+  expect(seen.questions[0]).toMatch(/^This prompt looks complex/)
+  expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
+})
+
+test('a simple prompt shows no restatement even if the reply carries one', async ($, on) => {
   const simple = engine(on, { rating: 'simple', answer: 'Keep current model', restate: 'Fix a typo.' })
   await submit($, 'Fix a typo')
   expect(simple.asked.length).toBe(1)
-  expect(simple.restated).toEqual([])
+  expect(simple.completesAtAsk).toEqual([1])
+  expect(simple.questions[0]).not.toContain('Read as')
 })
 
-test('a prompt that needs no dialog is not restated', async ($, on) => {
+test('a prompt that needs no dialog makes the one call and shows nothing', async ($, on) => {
   const seen = engine(on, { rating: 'moderate', model: 'claude-sonnet-5-5', restate: 'Rename a function.' })
   await submit($, 'Rename this function')
+  expect(seen.ratings.length).toBe(1)
   expect(seen.asked).toEqual([])
-  expect(seen.restated).toEqual([])
+})
+
+test('the rating call asks for the restatement only on a second line, and not for simple prompts', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep current model' })
+
+  await submit($, 'Redesign the auth layer')
+  const system = seen.ratings[0]!.system!
+  expect(system).toContain('first line')
+  expect(system).toContain('For simple, stop there')
+  expect(system).toContain('second line')
 })
 
 test('the first prompt is rated by one low-effort haiku call against a four-label rubric', async ($, on) => {
