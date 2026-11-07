@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { ModelCompleteInput, On, PromptSubmitInput, RenderElement, RenderSurface, TurnStepInput } from 'claude-code'
 
@@ -38,6 +38,9 @@ const TIMEOUT = '<timeout>'
 /** A setting's value for this call: a list gives out its items in order, then undefined. */
 const take = (v: string | string[] | undefined) => (Array.isArray(v) ? v.shift() : v)
 
+/** Runs what is due on the last engine's mocked clock, such as a band Refine's timer. */
+let settle: () => Promise<void> = async () => {}
+
 /** Answers, beneath the plugin, every engine call the mod makes. */
 function engine(on: On, s: Setup) {
   const asked: string[][] = []
@@ -59,6 +62,9 @@ function engine(on: On, s: Setup) {
   on('session.model', () => ({ value: s.model ?? 'claude-sonnet-5-5' }))
   on('session.surfaces', () => ({ value: s.surfaces ?? ['terminal'] }))
   on('prompt.read', () => ({ value: { text: s.draft ?? '', cursor: (s.draft ?? '').length } }))
+  // The band's Refine runs from a timer; a test moves this clock to run it.
+  const clock = mock.clock(on)
+  settle = clock.settle
   // The mod's store, kept here so a test reads what was saved.
   const store: Record<string, unknown> = { ...s.store }
   on('store.get', (_$, e) => ({ value: store[e.key] }))
@@ -759,6 +765,12 @@ async function band($: Engine, surface: 'desktop' | 'terminal' = 'terminal', pro
   return await $.ui.mount({ plugin: 'prompt-triage', surface, component: 'AbovePrompt', props: { ...BAND, ...props } })
 }
 
+/** Presses the band's Refine and runs the review it starts on a timer. */
+async function refine(ui: Awaited<ReturnType<typeof band>>) {
+  await ui.press({ key: 'refine' })
+  await settle()
+}
+
 /** Whether the drawing holds the phase 1 pickers and the Refine button. */
 async function hasPickers(ui: Awaited<ReturnType<typeof band>>) {
   const found = await Promise.all([...PICKERS, 'refine'].map(key => ui.find({ key })))
@@ -784,6 +796,8 @@ test('the band shows only for a draft that is not empty, not a slash command and
     ['   ', false],
     ['Fix the typo', false],
     [`Fix the typo\nin the README`, true],
+    // A line break at the end (Shift+Enter after the last word) counts too.
+    ['Fix the typo\n', true],
     [LONG, true],
     [`/review ${LONG}`, false],
   ] as const) {
@@ -842,7 +856,7 @@ test('every pick changes the reviewer instructions, and the defaults add none', 
   const ui = await band($)
   const options = { goal: ['check', 'off'], workflow: ['plan', 'interview', 'test'], scope: ['minimal', 'ambitious'] }
 
-  await ui.press({ key: 'refine' })
+  await refine(ui)
   await ui.press({ key: 'done' })
   const plain = seen.reviews[0]!.system!
   // The defaults send the reviewer's instructions as /refine-prompt sent them before the band existed.
@@ -853,7 +867,7 @@ test('every pick changes the reviewer instructions, and the defaults add none', 
   for (const key of PICKERS) {
     for (const value of options[key]) {
       await ui.select({ key, value })
-      await ui.press({ key: 'refine' })
+      await refine(ui)
       await ui.press({ key: 'done' })
       systems.push(seen.reviews.at(-1)!.system!)
     }
@@ -867,7 +881,7 @@ test('Refine reviews the draft, puts the rewrite in the box and shows a result r
   const seen = engine(on, { draft: LONG, review: REVIEWED })
   const ui = await band($)
 
-  await ui.press({ key: 'refine' })
+  await refine(ui)
   expect(seen.reviewed[0]).toContain(LONG)
   expect(seen.filled).toEqual(['Redesign auth in api, web and admin; done when tests pass.'])
   expect(await hasPickers(ui)).toBe(false)
@@ -886,7 +900,7 @@ test('Refine reviews the draft, puts the rewrite in the box and shows a result r
 test('Done closes the result row without touching the prompt box', async ($, on) => {
   const seen = engine(on, { draft: LONG, review: REVIEWED })
   const ui = await band($)
-  await ui.press({ key: 'refine' })
+  await refine(ui)
   await ui.press({ key: 'done' })
   expect(seen.filled.length).toBe(1)
   expect(await hasPickers(ui)).toBe(true)
@@ -895,18 +909,18 @@ test('Done closes the result row without touching the prompt box', async ($, on)
 test('Plan first notes in the result row that Shift+Tab cycles to plan mode', async ($, on) => {
   engine(on, { draft: LONG, review: [REVIEWED, REVIEWED], store: { picks: { workflow: 'plan' } } })
   const ui = await band($)
-  await ui.press({ key: 'refine' })
+  await refine(ui)
   expect(await ui.find({ type: 'Text', text: /shift\+tab/i })).toBeDefined()
 
   await ui.press({ key: 'done' })
   await ui.select({ key: 'workflow', value: 'written' })
-  await ui.press({ key: 'refine' })
+  await refine(ui)
   expect(await ui.find({ type: 'Text', text: /shift\+tab/i })).toBeUndefined()
 })
 
 test('Refine asks the questions only the person can answer, then rewrites with the answers', async ($, on) => {
   const seen = engine(on, { draft: LONG, answer: 'Hook code', review: [ASKS, ANSWERED] })
-  await (await band($)).press({ key: 'refine' })
+  await refine(await band($))
   expect(seen.questions).toEqual(['Which files should the review cover?'])
   expect(seen.reviewed[1]).toContain('Hook code')
   expect(seen.filled).toEqual(['Review hooks/register.ts.'])
@@ -920,7 +934,7 @@ test('a draft changed during the review is left alone, with a toast and no resul
   const seen = engine(on, s)
   const ui = await band($)
 
-  await ui.press({ key: 'refine' })
+  await refine(ui)
   expect(seen.filled).toEqual([])
   expect(seen.toasts.length).toBe(1)
   expect(await ui.find({ key: 'result' })).toBeUndefined()
@@ -934,7 +948,7 @@ for (const [how, review] of [['fails', undefined], ['throws', THROW]] as const) 
   test(`a review that ${how} leaves the draft alone and says so in a toast`, async ($, on) => {
     const seen = engine(on, { draft: LONG, review })
     const ui = await band($)
-    await ui.press({ key: 'refine' })
+    await refine(ui)
     expect(seen.filled).toEqual([])
     expect(seen.toasts.length).toBe(1)
     expect(await hasPickers(ui)).toBe(true)
@@ -943,7 +957,7 @@ for (const [how, review] of [['fails', undefined], ['throws', THROW]] as const) 
 
 test('a band refine marks the first prompt refined, so the model dialog does not offer it again', async ($, on) => {
   const seen = engine(on, { draft: LONG, review: REVIEWED })
-  await (await band($)).press({ key: 'refine' })
+  await refine(await band($))
   await submit($, seen.filled[0]!)
   expect(seen.asked[0]).toEqual(['Switch to opus', 'Keep current model'])
 })
@@ -952,7 +966,7 @@ test('the result row outlasts a short draft until the prompt is sent', async ($,
   const s: Setup = { draft: LONG, review: REVIEWED, turns: 1 }
   engine(on, s)
   const ui = await band($)
-  await ui.press({ key: 'refine' })
+  await refine(ui)
 
   s.draft = 'Fix it'
   expect((await (await band($)).find({ key: 'result' }))).toBeDefined()
@@ -964,6 +978,7 @@ test('Refine pressed twice while a review runs reviews once', async ($, on) => {
   const seen = engine(on, { draft: LONG, review: [REVIEWED, REVIEWED] })
   const ui = await band($)
   await Promise.all([ui.press({ key: 'refine' }), ui.press({ key: 'refine' })])
+  await settle()
   expect(seen.reviews.length).toBe(1)
 })
 
@@ -989,7 +1004,7 @@ test('a prompt sent while the band reviews is not followed by the rewrite or a r
   const seen = engine(on, s)
   const ui = await band($)
 
-  await ui.press({ key: 'refine' })
+  await refine(ui)
   await sent
   expect(seen.submitted.map(e => e.text)).toEqual([LONG])
   expect(seen.filled).toEqual([])
@@ -1005,8 +1020,30 @@ test('the Plan first note follows the pick the review used, not one changed duri
     picked = ui.select({ key: 'workflow', value: 'written' })
   }
 
-  await ui.press({ key: 'refine' })
+  await refine(ui)
   await picked
   expect(seen.filled.length).toBe(1)
   expect(await ui.find({ type: 'Text', text: /shift\+tab/i })).toBeDefined()
+})
+
+test('the pickers are drawn Goal, Workflow, Scope, as the proposal lays them out', async ($, on) => {
+  engine(on, { draft: LONG, surfaces: ['desktop'] })
+  for (const surface of SURFACES) {
+    const keys = (await (await band($, surface)).findAll({ type: 'Select' })).map(s => s.props.key)
+    expect(keys.filter(k => k !== 'run-in')).toEqual(['goal', 'workflow', 'scope'])
+  }
+})
+
+test('Refine returns at once and reviews from a timer, since a press has a 10 s budget the review and questions outlast', async ($, on) => {
+  const seen = engine(on, { draft: LONG, review: REVIEWED })
+  const ui = await band($)
+
+  const idle = (await ui.find({ key: 'refine' }))?.props.label
+  await ui.press({ key: 'refine' })
+  expect(seen.reviews.length).toBe(0)
+  // The button says a review is running until it ends.
+  expect((await ui.find({ key: 'refine' }))?.props.label).not.toBe(idle)
+  await settle()
+  expect(seen.reviews.length).toBe(1)
+  expect(seen.filled.length).toBe(1)
 })

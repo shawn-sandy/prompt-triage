@@ -34,7 +34,7 @@ const REVIEWER =
 // The refine band's pickers: each option's label and the line it adds to REVIEWER; the first option is the default and adds none.
 // Sources, read 2026-11-06: code.claude.com/docs/en/best-practices (BP), code.claude.com/docs/en/common-workflows (CW),
 // platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices (PBP).
-// Listed Workflow first, then Goal, then Scope: the order the reviewer reads them in.
+// Listed Workflow first, then Goal, then Scope: the order the reviewer reads them in. The band draws them Goal, Workflow, Scope.
 const PICKERS = {
   workflow: {
     label: 'Workflow',
@@ -78,7 +78,9 @@ const PICKERS = {
 } as const
 type Picker = keyof typeof PICKERS
 type Picks = { [K in Picker]: keyof (typeof PICKERS)[K]['options'] & string }
-const PICKER_KEYS = Object.keys(PICKERS) as Picker[]
+// A band row: a cell between controls, wrapping to a second row where the band is too narrow for every pick's label.
+const ROW = { columnGap: 1, flexWrap: 'wrap' } as const
+const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
 
 /** The picks saved in the mod's store, each one that is missing or not an option at its default. */
 async function loadPicks($: EngineInterface): Promise<Picks> {
@@ -94,7 +96,7 @@ async function loadPicks($: EngineInterface): Promise<Picks> {
 
 /** The reviewer's system prompt with a line for each pick that is not its default. */
 function reviewer(picks: Picks): string {
-  const lines = PICKER_KEYS.map(key => (PICKERS[key].options as Record<string, readonly [string, string]>)[picks[key]]?.[1]).filter(Boolean)
+  const lines = (Object.keys(PICKERS) as Picker[]).map(key => (PICKERS[key].options as Record<string, readonly [string, string]>)[picks[key]]?.[1]).filter(Boolean)
   return lines.length ? `${REVIEWER}\nThe person picked these refinements; apply them:\n${lines.map(l => `- ${l}`).join('\n')}` : REVIEWER
 }
 
@@ -102,7 +104,8 @@ function reviewer(picks: Picks): string {
 function shows(draft: string, band: unknown): boolean {
   const text = draft.trim()
   if (!text || text.startsWith('/') || band === 'never') return false
-  return band === 'always' || text.length >= 40 || text.includes('\n')
+  // The line break is looked for before trimming, so one typed at the end (Shift+Enter after the last word) counts.
+  return band === 'always' || text.length >= 40 || draft.includes('\n')
 }
 
 /** The rater's system prompt: each rating defined by the shape of the task. Exported so scripts/eval-rating.mjs scores the exact text sent. */
@@ -376,37 +379,42 @@ export const register: Register = (on, options) => {
       label: busy ? 'Reviewing with haiku...' : 'Refine',
       hotkey: 'r',
       variant: 'primary',
-      onPress: async () => {
+      onPress: () => {
         if (busy) return
         busy = true
         redraw()
-        try {
-          const used = { ...current }
-          const at = sends
-          const done = await refineDraft($, used, () => sends !== at).catch(() => undefined)
-          if (done === 'stale') $.ui.toast('The draft changed or was sent during the review; press Refine again')
-          else if (done === undefined) $.ui.toast('Review failed; the prompt was not changed')
-          else if (done !== 'empty') {
-            result = { ...done, plan: used.workflow === 'plan', expanded: false }
-            // The first prompt is refined now, so the model dialog does not offer Refine prompt again for it.
-            improved = true
-          }
-        } finally {
-          busy = false
-          redraw()
-        }
+        const used = { ...current }
+        const at = sends
+        // The review and its questions outlast the press's 10 s budget, so they run from a timer, which has none.
+        $.clock.after(0, () => {
+          void refineDraft($, used, () => sends !== at)
+            .catch(() => undefined)
+            .then(done => {
+              if (done === 'stale') $.ui.toast('The draft changed or was sent during the review; press Refine again')
+              else if (done === undefined) $.ui.toast('Review failed; the prompt was not changed')
+              else if (done !== 'empty') {
+                result = { ...done, plan: used.workflow === 'plan', expanded: false }
+                // The first prompt is refined now, so the model dialog does not offer Refine prompt again for it.
+                improved = true
+              }
+            })
+            .finally(() => {
+              busy = false
+              redraw()
+            })
+        })
       },
     })
 
     if (!refining) return h(Box, null, runIn, await next(e)) as RenderElement
-    if (!result) return h(Box, { flexDirection: 'column' }, h(Box, null, h(Text, { dimColor: true }, 'Refine '), ...pickers, runIn, refine), await next(e)) as RenderElement
+    if (!result) return h(Box, { flexDirection: 'column' }, h(Box, ROW, h(Text, { dimColor: true }, 'Refine'), ...pickers, runIn, refine), await next(e)) as RenderElement
 
     const last = result
     const count = last.issues.length
     const row = h(
       Box,
-      { key: 'result' },
-      h(Text, null, count ? `Refined: ${count} issue${count === 1 ? '' : 's'} ` : 'Refined: no issues '),
+      { key: 'result', ...ROW },
+      h(Text, null, count ? `Refined: ${count} issue${count === 1 ? '' : 's'}` : 'Refined: no issues'),
       count
         ? h(Button, {
             key: 'show-issues',
@@ -434,7 +442,7 @@ export const register: Register = (on, options) => {
           redraw()
         },
       }),
-      last.plan ? h(Text, { dimColor: true }, ' Shift+Tab cycles to plan mode') : null,
+      last.plan ? h(Text, { dimColor: true }, 'Shift+Tab cycles to plan mode') : null,
       runIn,
     )
     const list = last.expanded ? h(Box, { flexDirection: 'column' }, ...last.issues.map(issue => h(Text, null, `- ${issue}`))) : null
