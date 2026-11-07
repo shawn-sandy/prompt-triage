@@ -137,9 +137,56 @@ It asks the same questions, shows the issues and puts the rewrite in the prompt
 box. Nothing is sent until you press Enter. Versions up to 0.3.3 called this
 command `/improve`; that name no longer runs.
 
+### The refine band
+
+In the terminal and the desktop app, a band above the prompt input offers the
+review while you type, for any prompt in the session:
+
+```text
+Refine  Goal: Auto  Workflow: As written  Scope: As written  Run in: This session   [r] Refine
+```
+
+**Run in** is drawn in the desktop app only (see above). The band shows when the
+draft is not empty, is not a slash command, and is 40 characters or longer or
+has a line break. It shows while Claude is working too, and gives way to a
+survey. The mod's `band` option in the config menu changes the rule: `always`
+shows it for any draft, `never` hides it (Run in still shows in the desktop
+app). The default is `long`.
+
+Each picker adds one instruction to the review. Each one's default adds none,
+so with no picks the review is the same as **Refine prompt** and
+`/refine-prompt`.
+
+| Picker | Pick | What the review does |
+| --- | --- | --- |
+| Goal | Auto (default) | Flags a missing done-condition, as the review always has. |
+| Goal | Add a check | Ends the rewrite with what done looks like and a check Claude can run, and asks for the command and its output as evidence. |
+| Goal | Off | Skips the goal and done-criteria checks. |
+| Workflow | As written (default) | Adds no workflow. |
+| Workflow | Plan first | Asks Claude to read the code and propose a plan, with no edits until you approve. |
+| Workflow | Interview me | Rewrites the prompt as a request to interview you until Claude could write the spec, then write it to `SPEC.md`. |
+| Workflow | Test first | For a bug: describe the symptom, write a failing test that reproduces it, then fix it. |
+| Scope | As written (default) | No change. |
+| Scope | Minimal | Limits the change to what was asked: no extra files, abstractions or refactors. |
+| Scope | Ambitious | Adds "be ambitious:" and the fuller version you want, asking which extras rather than inventing them. |
+
+Your picks are saved in the mod's store and come back next session.
+**Refine prompt** in the model dialog and `/refine-prompt` use the same picks.
+
+Press **Refine** (`r` once the band has focus, from `ctrl+x tab` or a click) to
+review the draft. It asks the same questions as **Refine prompt**, then puts
+the rewrite in the prompt box, and the band shows the number of issues, **Show
+issues**, **Restore original** (puts back the draft you had) and **Done**. With
+**Plan first** it also notes that Shift+Tab cycles to plan mode. That row stays
+until you press **Restore original** or **Done**, or send a prompt. If you keep
+typing or send a prompt during the review, the prompt box is left alone and a
+toast asks you to press **Refine** again. If the review fails, a toast says so and the draft is
+unchanged. A refine from the band counts as refining the session's first
+prompt, so the model dialog does not offer **Refine prompt** again for it.
+
 ## Hooks
 
-The mod registers seven hooks in `hooks/register.ts`. `prompt.submit` and
+The mod registers nine hooks in `hooks/register.ts`. `prompt.submit` and
 `command.run` are also the names of calls, so these hooks run whenever a
 prompt is submitted or `/model`, `/effort` or `/refine-prompt` is run, whether you do it or
 other code (the app, another mod) does. The mod never makes either call
@@ -148,10 +195,11 @@ itself.
 | Hook | When it acts | What it may change |
 | --- | --- | --- |
 | `session.start` | Each session start. | Registers the `/refine-prompt` command. |
-| `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, on the desktop surface, unless a survey holds the band. | Draws the **Run in** picker above whatever else draws the band. Changes nothing until you send. |
+| `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, unless a survey holds the band. | Draws the refine band (Goal, Workflow and Scope pickers and **Refine**, or the result row after a refine) when the draft meets the `band` setting, and in the desktop app the **Run in** picker, above whatever else draws the band. **Refine** puts its rewrite in the prompt box and **Restore original** puts the draft back; nothing else changes until you send. |
+| `prompt.edit`, `prompt.change` | Each change to the prompt box. | Change nothing. Redraw the band when the draft starts or stops meeting the `band` setting. |
 | `prompt.submit` | On any prompt that is not a slash command, a meta prompt or part of a running turn while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
-| `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
+| `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given with the band's picks, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
 | `command.run` (`/effort` only) | Each run of `/effort`. | Leaves the command unchanged. Clears the effort minimum or lowered effort and its part of the status line. |
 
@@ -185,9 +233,9 @@ One `haiku` request at effort `low`, with its reply capped at 256 tokens, on
 the first prompt of each session. Later prompts are not checked. The same
 request returns the rating and, for a `moderate`, `complex` or `long-running`
 prompt, the one-line restatement, so the dialog never waits on a second call.
-A `simple` prompt gets the label only. Each **Refine prompt** or
-`/refine-prompt` adds one `haiku` request, and a second when you answer its
-questions.
+A `simple` prompt gets the label only. Each **Refine prompt**,
+`/refine-prompt` or band **Refine** adds one `haiku` request, and a second when
+you answer its questions. The band makes no request while you type.
 
 ## Limits
 
@@ -226,11 +274,13 @@ questions.
 The text of your first prompt is sent once per session to `haiku` through
 `$.model.complete`, to get the rating and, for a `moderate`, `complex` or `long-running` prompt,
 the one-line restatement. When you choose
-**Refine prompt** or run `/refine-prompt`, that prompt is also sent to `haiku`
+**Refine prompt**, run `/refine-prompt` or press **Refine** in the band, that prompt is also sent to `haiku`
 through `$.model.complete` for the review, and sent again with your answers
 when you answer its questions. The path check reads only whether
 files exist, not their contents. The mod does not persist prompt data, the
-model override or the effort minimum; they are held in memory for the session. It writes no
+model override or the effort minimum; they are held in memory for the session.
+The band's Goal, Workflow and Scope picks, and nothing else, are saved in the
+mod's store across sessions. It writes no
 files and makes no network requests of its own. The
 only context it adds is the new-session instruction described above, and only
 when you choose that option.
@@ -265,7 +315,7 @@ node scripts/eval-rating.mjs --baseline
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the seven hooks and the `/refine-prompt` command. |
+| `hooks/register.ts` | All of the mod's logic: the nine hooks and the `/refine-prompt` command. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
 | `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`. |

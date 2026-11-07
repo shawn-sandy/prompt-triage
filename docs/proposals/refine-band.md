@@ -1,6 +1,8 @@
 # Proposal: a prompt refinement band above the prompt input
 
-Status: proposal, not implemented. Written 2026-11-06 against Claude Code build
+Status: phase 1 (Goal, Workflow and Scope, Refine and its result row, the
+`band` setting) and the Run in picker are implemented; phases 2 and 3, the
+always-on checks and the [Dialog path](#dialog-path) changes are not. Written 2026-11-06 against Claude Code build
 2.1.317 (the mod API types that build ships) and the Anthropic docs pages listed
 under [Sources](#sources), read the same day.
 

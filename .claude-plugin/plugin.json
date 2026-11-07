@@ -5,5 +5,14 @@
   "author": { "name": "Shawn Sandy" },
   "homepage": "https://github.com/shawn-sandy/prompt-triage",
   "license": "MIT",
-  "icon": "./icon.png"
+  "icon": "./icon.png",
+  "userConfig": {
+    "band": {
+      "type": "string",
+      "title": "Refine band",
+      "description": "When the Goal, Workflow and Scope pickers and the Refine button show above the prompt: always, long (drafts of 40 characters or more, or with a line break) or never.",
+      "default": "long",
+      "options": ["always", "long", "never"]
+    }
+  }
 }

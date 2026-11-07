@@ -70,7 +70,6 @@
   .issues li { overflow-wrap: anywhere; }
   .issues .skip { color: var(--amber); }
   .count { color: var(--amber); }
-  .band-hint { color: var(--dim); font-size: 12px; padding: 4px 14px; border-top: 1px solid var(--frame-line); }
 
   /* Composer */
   .composer { border-top: 1px solid var(--frame-line); padding: 10px 14px 12px; display: grid; gap: 6px; }
@@ -112,6 +111,7 @@
     <h1>Refine Prompt Band</h1>
     <div class="source">Prototype &middot; from docs/proposals/refine-band.md &middot; simulated: no model calls, canned review</div>
     <p class="lede">A clickable mockup of the proposed prompt-triage band. Type or edit the draft, pick options in the band, press <b>Refine</b>. Or press Enter on the first prompt to see the model dialog path, and compare the current "blocked" warning with the proposed notice.</p>
+    <p class="lede">Shipped so far: the Goal (Auto, Add a check, Off), Workflow and Scope pickers, <b>Refine</b> and its result row, and the desktop-only <b>Run in</b> picker, which shows even when the rest of the band is hidden. Still proposal only: Goal <b>As /goal</b>, the <b>Run</b> picker, the cleanup of advice phrases such as "think hard", and the proposed dialog notice. The terminal draws no Run in picker.</p>
   </header>
 
   <div class="layout">
@@ -120,7 +120,6 @@
       <div class="transcript" id="transcript" aria-live="polite"></div>
 
       <div class="band" id="band" role="group" aria-label="Refine band"></div>
-      <div class="band-hint" id="band-hint" hidden></div>
 
       <div class="composer">
         <label class="status" for="draft">Prompt</label>
@@ -205,7 +204,7 @@
   var state = { firstSent: false, offeredRefine: true, busy: false, original: null, result: null, showIssues: false, runIn: "here" };
 
   var $ = function (id) { return document.getElementById(id); };
-  var draft = $("draft"), band = $("band"), hint = $("band-hint"), transcript = $("transcript"), statusEl = $("status");
+  var draft = $("draft"), band = $("band"), transcript = $("transcript"), statusEl = $("status");
 
   function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
   function announce(t) { statusEl.textContent = t; }
@@ -217,21 +216,18 @@
   function bandVisible() {
     var t = draft.value;
     if (prefs.band === "never" || !t.trim() || t.trim().charAt(0) === "/") return false;
-    return prefs.band === "always" || t.length >= 40 || t.indexOf("\n") >= 0;
+    return prefs.band === "always" || t.trim().length >= 40 || t.indexOf("\n") >= 0;
   }
 
   function renderBand() {
     while (band.firstChild) band.removeChild(band.firstChild);
-    hint.hidden = true;
     if (state.result && prefs.band !== "never") { renderResult(); band.hidden = false; return; }
+    band.hidden = false;
     if (!bandVisible()) {
-      band.hidden = true;
-      if (prefs.band !== "never" && draft.value.trim() && draft.value.trim().charAt(0) !== "/") {
-        hint.hidden = false; hint.textContent = "Band hidden: the draft is under 40 characters (setting: long).";
-      }
+      // The desktop app draws Run in alone while the rest of the band is hidden.
+      var only = el("div", "band-row"); only.appendChild(runInPick()); band.appendChild(only);
       return;
     }
-    band.hidden = false;
     var row = el("div", "band-row");
     row.appendChild(el("span", "band-label", "Refine"));
     Object.keys(PICKS).forEach(function (key) {
@@ -243,20 +239,25 @@
       sel.addEventListener("change", function () { prefs.picks[key] = sel.value; savePrefs(); });
       wrap.appendChild(sel); row.appendChild(wrap);
     });
-    // Run in is one-shot and desktop-only, so it is kept in state, not saved with the other picks.
-    var runWrap = el("label", "pick");
-    runWrap.appendChild(document.createTextNode("Run in:"));
-    var runSel = el("select"); runSel.id = "pick-run-in";
-    [["here", "This session"], ["new", "New session"]].forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; runSel.appendChild(op); });
-    runSel.value = state.runIn;
-    runSel.addEventListener("change", function () { state.runIn = runSel.value; });
-    runWrap.appendChild(runSel); row.appendChild(runWrap);
+    row.appendChild(runInPick());
     var btn = el("button", "bbtn"); btn.type = "button"; btn.id = "refine-btn";
     btn.appendChild(el("span", "key", "[r] ")); btn.appendChild(document.createTextNode(state.busy ? "Reviewing with haiku..." : "Refine"));
     btn.disabled = state.busy;
     btn.addEventListener("click", function () { refine("band"); });
     row.appendChild(btn);
     band.appendChild(row);
+  }
+
+  // Run in is one-shot and desktop-only, so it is kept in state, not saved with the other picks.
+  function runInPick() {
+    var runWrap = el("label", "pick");
+    runWrap.appendChild(document.createTextNode("Run in:"));
+    var runSel = el("select"); runSel.id = "pick-run-in";
+    [["here", "This session"], ["new", "New session"]].forEach(function (o) { var op = el("option", null, o[1]); op.value = o[0]; runSel.appendChild(op); });
+    runSel.value = state.runIn;
+    runSel.addEventListener("change", function () { state.runIn = runSel.value; });
+    runWrap.appendChild(runSel);
+    return runWrap;
   }
 
   function renderResult() {
@@ -274,12 +275,14 @@
     });
     var done = el("button", "bbtn", "Done"); done.type = "button"; done.id = "done";
     done.addEventListener("click", function () { state.result = null; state.showIssues = false; renderBand(); draft.focus(); });
-    row.appendChild(show); row.appendChild(restore); row.appendChild(done);
+    if (n) row.appendChild(show);
+    row.appendChild(restore); row.appendChild(done);
+    if (r.plan) row.appendChild(el("span", "band-label", "Shift+Tab cycles to plan mode"));
+    row.appendChild(runInPick());
     band.appendChild(row);
     if (state.showIssues) {
       var ul = el("ul", "issues"); ul.id = "issue-list";
       r.issues.forEach(function (i) { ul.appendChild(el("li", i.indexOf("not applied") >= 0 ? "skip" : null, i)); });
-      if (!n) ul.appendChild(el("li", null, "No issues found."));
       band.appendChild(ul);
     }
   }
@@ -359,7 +362,7 @@
 
     var goalSkipped = p.goal === "goal" && p.workflow === "interview";
     if (p.workflow === "interview") body = "I want to " + lcFirst(body.replace(/\.$/, "")) + ". I haven't pinned down the details. Interview me until you could write the spec, then write it to SPEC.md.";
-    if (p.workflow === "plan") { tail.push("Read the relevant code first and propose a plan. Make no edits until I approve it."); issues.push("Shift+Tab cycles to plan mode if you want Claude Code to enforce the no-edit step."); }
+    if (p.workflow === "plan") tail.push("Read the relevant code first and propose a plan. Make no edits until I approve it.");
     if (p.workflow === "test") tail.push("Start with a failing test that reproduces the problem, then make it pass.");
     if (p.scope === "minimal") tail.push("Change only what this asks for: no extra files, abstractions or refactors.");
     if (p.scope === "ambitious") { if (a("extras")) tail.push("Be ambitious: include " + lcFirst(a("extras")) + ", not just the minimum."); else issues.push("Scope is Ambitious but no extras were named, so none were added."); }
@@ -379,7 +382,7 @@
       rewrite = "/goal " + end + ". Task: " + body.replace(/\s+/g, " ") + (tail.length ? " " + tail.join(" ") : "") + " Nothing outside this task changes. Stop after 30 turns.";
       if (!a("end")) issues.push("No end state was named for /goal; review the condition before sending.");
     }
-    return { rewrite: rewrite, issues: issues };
+    return { rewrite: rewrite, issues: issues, plan: p.workflow === "plan" };
   }
 
   async function refine(source) {
@@ -398,7 +401,7 @@
     if (draft.value !== text) {
       // The draft changed during the review: filling would discard the new edits, so keep them and skip the rewrite.
       state.busy = false; state.original = null; renderBand();
-      addLine("msg-dim", "Toast: the draft changed during the review, so the rewrite was not applied. Press Refine again.");
+      addLine("msg-dim", "Toast: The draft changed or was sent during the review; press Refine again");
       announce("The draft changed during the review, so the rewrite was not applied.");
       return;
     }
