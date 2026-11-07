@@ -25,16 +25,27 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     steps:
+      # main requires PRs; this App is on the ruleset's bypass list so the bump commit can push.
+      - id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.BUMP_APP_ID }}
+          private-key: ${{ secrets.BUMP_APP_PRIVATE_KEY }}
+          permission-contents: write # the token needs only checkout, push and release
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the subjects of every pushed commit are read below
+          token: ${{ steps.app-token.outputs.token }}
       - name: Bump version and release
         env:
           BEFORE: ${{ github.event.before }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           current=$(jq -r .version .claude-plugin/plugin.json)
-          if git log --format=%s "$BEFORE"..HEAD | grep -qE '^feat(\([^)]*\))?:'; then
+          # Scan from the current version's release tag, so commits from runs that failed still count.
+          since="prompt-triage--v$current"
+          git rev-parse -q --verify "refs/tags/$since" >/dev/null || since="$BEFORE"
+          if git log --format=%s "$since"..HEAD | grep -qE '^feat(\([^)]*\))?:'; then
             next=$(echo "$current" | awk -F. -v OFS=. '{ $2++; $3 = 0; print }')
           else
             next=$(echo "$current" | awk -F. -v OFS=. '{ $NF++; print }')
