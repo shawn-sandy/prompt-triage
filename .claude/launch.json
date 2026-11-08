@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "prompt-triage-site",
+      "name": "staging",
       "url": "https://prompt-triage.netlify.app/"
     }
   ]
