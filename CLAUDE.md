@@ -58,6 +58,20 @@ A third-party guide claimed these. Check the generated declarations before relyi
 - What happens when two mods call `$.ui.status`.
 - What `$.model.classify` takes and returns. The page lists only its name.
 
+## Model and cost references
+
+Anthropic's docs for the choices this mod makes about models and effort. Read the matching page
+before changing a rating, a model suggestion or an effort minimum.
+
+- [Models overview](https://platform.claude.com/docs/en/models/overview): the current lineup,
+  model IDs, default effort for each model, context windows and pricing.
+- [Choosing a model](https://platform.claude.com/docs/en/about-claude/models/choosing-a-model):
+  the criteria, two ways to pick a starting model, and why tuning effort is often a better
+  lever than switching models.
+- [Steering thinking](https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost):
+  how effort levels, prompt guidance and per-message steering control how often and how deeply
+  Claude thinks, and what that costs.
+
 ## Commands
 
 ```bash
