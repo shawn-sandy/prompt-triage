@@ -9,13 +9,12 @@ Official reference: https://code.claude.com/docs/en/plugins/mods/reference
 
 Read it, or the TypeScript declarations Claude Code writes for the installed version, before
 using any event or `$` method that `hooks/register.ts` does not already use. The page says the
-declarations are the complete reference and win over the docs when the two disagree. The repo's
-`.gitignore` ignores `.claude-plugin/types/`; the page does not name the folder the
-declarations land in.
+declarations are the complete reference and win over the docs when the two disagree. They are in
+`.claude-plugin/types/`, which `tsconfig.json` extends. The folder is gitignored and written only
+by an interactive session, so a fresh clone, a new worktree and CI have none.
 
 The page was read on 2026-11-08. It covers the CLI and Desktop app as of v2.1.290 and the VS Code
-extension as of v2.1.299. Claude Code 2.1.319 was installed then, past every version gate on the
-page. Version-gated entries say "requires v2.1.xxx" on the page.
+extension as of v2.1.299. Version-gated entries say "requires v2.1.xxx" on the page.
 
 ### Events worth knowing (confirmed on the page)
 
@@ -63,8 +62,29 @@ A third-party guide claimed these. Check the generated declarations before relyi
 
 ```bash
 claude --plugin-dir .          # load the mod from this folder; reloads on save
-claude plugin validate . --strict
-claude plugin test
+claude plugin validate .       # CI runs this form; --strict is stricter
+claude plugin test .           # runs hooks/register.test.ts
+node scripts/eval-rating.mjs   # scores the rating rubric; --baseline scores bare labels
 ```
 
+The eval makes 160 `claude -p --model haiku` calls. It needs Node 24, a signed-in `claude` and
+network access to api.anthropic.com; in a sandbox, a timeout means that host is blocked. It
+imports `RATER` and `parseRating` from `hooks/register.ts`, so both must stay exported.
+
 `/reload-plugins` reloads plugins from the prompt.
+
+## CI and releases
+
+`check.yml` runs `claude plugin validate .` and `claude plugin test .` on every pull request,
+with Claude Code pinned to 2.1.319, past every version gate on the page. There is no typecheck
+step.
+
+Do not edit `version` in `.claude-plugin/plugin.json`. The `bump-version` workflow does it when
+a push to main changes `hooks/register.ts`, `hooks/hooks.json` or the workflow file. A commit
+subject starting `feat:` or `feat(scope):` makes it a minor bump; anything else is a patch.
+Changes that touch none of those three files do not release.
+
+## Files
+
+`assets/` holds the source icon files. The root `icon.png`, which `plugin.json` points at, is a
+byte-identical copy of `assets/icon.png`.
