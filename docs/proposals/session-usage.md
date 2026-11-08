@@ -93,6 +93,9 @@ with that `id` exists, writes the three numbers onto it.
 
 `/triage-stats` then adds, for each rating, the number of sessions that ended
 with a recorded cost and their average cost, split into "switched" and "kept".
+A hand-off, logged as **Open in a new session** with `from` equal to `to`, gets
+its own line rather than counting as "kept": the task ran in another session, so
+the short session that logged it says nothing about keeping the model.
 **Every average prints with its count beside it.** The log keeps at most 200
 entries, so each cell is small, and an average of two sessions should look like
 one.
@@ -203,6 +206,12 @@ second model call, and changes two things:
    documents, not a dialog opened mid-session, which it does not.
 2. The signal is `context.percent` and the turn count together, with thresholds
    read from A's data rather than guessed.
+
+**What the threshold can mean.** A's data says how large `simple` sessions
+usually get and where `complex` ones start. It does not record whether a large
+`simple` session needed a stronger model, since nothing logs that. So the line
+is a size warning, not a detected rating error, and it should say the session is
+large, not that the rating was wrong.
 
 Once per session, when a session rated `simple` crosses the threshold, show one
 line: the rating, how large the session is now, and `/model` or a new session as
