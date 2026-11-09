@@ -79,9 +79,12 @@ claude --plugin-dir .          # load the mod from this folder; reloads on save
 claude plugin validate .       # CI runs this form; --strict is stricter
 claude plugin test .           # runs hooks/register.test.ts
 node scripts/eval-rating.mjs   # scores the rating rubric; --baseline scores bare labels
+node scripts/eval-rating.mjs --runs 3   # the mean of 3 runs; one run varies by a few cases
 ```
 
-The eval makes 160 `claude -p --model haiku` calls. It needs Node 24, a signed-in `claude` and
+The eval makes 160 `claude -p --model haiku` calls per run. One run of the unchanged rubric has
+scored `complex` anywhere from 32/40 to 36/40, so compare rubric changes on the mean of several
+runs. It needs Node 24, a signed-in `claude` and
 network access to api.anthropic.com; in a sandbox, a timeout means that host is blocked. It
 imports `RATER` and `parseRating` from `hooks/register.ts`, so both must stay exported.
 
