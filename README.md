@@ -83,8 +83,9 @@ desktop app it can also hand a complex or long-running task to a new session.
    the prompt unchanged.
 8. Each rating also sets a minimum effort: none for simple, `medium` for
    moderate, `high` for complex and long-running. See [Effort](#effort).
-9. Every decision is written to a log in the mod's store, and `/triage-stats`
-   prints the tally. See [The decision log](#the-decision-log).
+9. Every decision is written to a log in the mod's store, along with what the
+   session cost after it, and `/triage-stats` prints the tally. See
+   [The decision log](#the-decision-log).
 
 The switch applies to the main conversation's requests for the rest of the
 session; subagents keep their own models. While it is in effect the status
@@ -142,8 +143,17 @@ rating, with how many sessions it rated, how many of those changed model
 tier, and how many of those changes went up to a pricier tier or down to a
 cheaper one. That is the first record of whether a suggestion is ever taken,
 so the question of whether the rating call pays for itself can be answered
-from a count rather than from arithmetic. Neither the log nor the command
-makes a model request.
+from a count rather than from arithmetic.
+
+Each entry also carries a random `id`, which links to nothing outside the
+log, and, once the session has spent anything, its `cost`: the US dollars the
+session spent after the decision was logged, as `/cost` totals them, so the
+rating call itself is left out. The figure is updated at the end of each
+main-loop turn; subagent turns do not write it. When at least one entry has a
+cost, `/triage-stats` adds a second table: for each rating and choice (switched
+model, low effort, kept the model, or handed off to a new session), how many
+sessions have a cost and their average. Neither the log nor the command makes a
+model request.
 
 ## Improving a prompt
 
@@ -229,7 +239,7 @@ prompt, so the model dialog does not offer **Refine prompt** again for it.
 
 ## Hooks
 
-The mod registers ten hooks in `hooks/register.ts`. `prompt.submit` and
+The mod registers eleven hooks in `hooks/register.ts`. `prompt.submit` and
 `command.run` are also the names of calls, so these hooks run whenever a
 prompt is submitted or `/model`, `/effort`, `/refine-prompt` or `/triage-stats` is run, whether you do it or
 other code (the app, another mod) does. The mod never makes either call
@@ -242,6 +252,7 @@ itself.
 | `prompt.edit`, `prompt.change` | Each change to the prompt box. | Change nothing. Redraw the band when the draft starts or stops meeting the `band` setting. |
 | `prompt.submit` | On any prompt that is not a slash command, a meta prompt or part of a running turn while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
+| `turn.complete` | The end of each main-loop turn after a rated first prompt. Subagent turns pass through untouched. | Changes nothing in the turn. Reads the session's cost and, when it changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given with the band's picks, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/triage-stats` only) | Each run of `/triage-stats`. | Reads the decision log from the store and prints the tally. Changes nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
@@ -309,7 +320,16 @@ request at all.
 - The decision log is one list that every session appends to without a lock,
   since the store has no atomic update. Two sessions rating their first
   prompt within the same few milliseconds can lose one entry. This is
-  accepted: the log is a tally, and a missing row costs nothing else.
+  accepted: the log is a tally, and a missing row costs nothing else. Each
+  turn that changes a session's cost rewrites the list too, which makes such a
+  loss more likely; a lost cost is put back by that session's next turn.
+- A session's cost is everything the session spent after its decision was
+  logged, including subagents and any other mod's model calls, until the next
+  first prompt (as after `/clear`) starts a new entry. An entry already pushed
+  out by the 200-entry cap is not updated or added back.
+- Sessions differ in task, so the cost table shows which choices went with
+  cheaper sessions, not that a choice made them cheaper. `/triage-stats` says
+  so under the table.
 - Whether a request takes effort is read from the session's model. If you
   switch to a model that takes no effort setting, the status line can still
   say effort was raised, though none is sent; if the session's own model takes
@@ -336,7 +356,9 @@ model override or the effort minimum; they are held in memory for the session.
 Two things are saved in the mod's store across sessions: the band's Goal,
 Workflow and Scope picks, and the decision log under the key `decisions`, a
 list of at most 200 entries each holding the rating, the main-loop model
-before and after and the option chosen. No prompt text is logged. `/triage-stats` reads it; nothing else
+before and after, the option chosen, a random id and the session's cost in US
+dollars. The id is made by the mod and is not the session id, so it points at
+no transcript. No prompt text is logged. `/triage-stats` reads it; nothing else
 does. It writes no
 files and makes no network requests of its own. The
 only context it adds is the new-session instruction described above, and only
@@ -382,7 +404,7 @@ node scripts/eval-rating.mjs --runs 3
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the ten hooks and the `/refine-prompt` and `/triage-stats` commands. |
+| `hooks/register.ts` | All of the mod's logic: the eleven hooks and the `/refine-prompt` and `/triage-stats` commands. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
 | `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`, once or averaged over `--runs N`. |

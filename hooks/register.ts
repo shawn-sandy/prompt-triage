@@ -24,8 +24,13 @@ const COUNT = ['zero', 'one', 'two', 'three']
 const LOG = 'decisions'
 // ponytail: ~100 bytes an entry, so 200 is ~20 KiB of the store's 4 MiB; raise it once /triage-stats wants a longer history
 const LOG_CAP = 200
-/** One logged decision: the rating, the main-loop model before and after, and the option chosen. */
-type Decision = { rating: Rating; from: string; to: string; chose: string }
+/**
+ * One logged decision: the rating, the main-loop model before and after, and the option chosen. `id` is random and links to nothing
+ * (not the session id, which names the transcript file); it lets a later turn find the entry. `cost` is US dollars spent since the decision.
+ */
+type Decision = { rating: Rating; from: string; to: string; chose: string; id?: string; cost?: number }
+/** The entry this session last logged and the session's cost when it did, so a turn can record the spend since. */
+type Tracked = { id: string; base: number; last?: number }
 /** What each rating says it would take, said in the dialog beside the rating so the suggestion is read with its reason. */
 const SIZE: Record<Rating, string> = {
   simple: 'haiku or low effort would do',
@@ -307,6 +312,41 @@ async function log($: EngineInterface, entry: Decision): Promise<void> {
 }
 
 /**
+ * Logs a decision under a fresh id and reads the cost so far as its baseline. Never rejects: a failed log or usage read only means
+ * no cost is tracked. Undefined when there is no baseline, since a cost cannot then be told apart from earlier spend.
+ */
+async function record($: EngineInterface, entry: Decision): Promise<Tracked | undefined> {
+  const id = crypto.randomUUID()
+  const base = (await $.session.usage().catch(() => undefined))?.cost?.usd
+  await log($, { ...entry, id }).catch(() => undefined)
+  return base === undefined ? undefined : { id, base }
+}
+
+/**
+ * Sets the cost on the entry with this id. Never appends: an entry the cap pushed out stays out. Rejects when the store does, and,
+ * like `log()`, a failed read rejects rather than writing back a list that lost other sessions' entries.
+ */
+async function addCost($: EngineInterface, id: string, cost: number): Promise<void> {
+  const stored = await $.store.get(LOG)
+  const list = Array.isArray(stored) ? (stored as Decision[]) : []
+  if (!list.some(d => d.id === id)) return
+  await $.store.set(LOG, list.map(d => (d.id === id ? { ...d, cost } : d)))
+}
+
+/** A decision's tier direction: 1 up, -1 down, 0 none; undefined for a change between names the mod cannot rank. */
+const direction = (d: Decision) => {
+  // A switch is a change of tier where both ends rank ("use opus" on claude-opus-5-5 is none); unrankable names compare as text.
+  const [a, b] = [rank(d.from), rank(d.to)]
+  return a === undefined || b === undefined ? (d.to === d.from ? 0 : undefined) : Math.sign(b - a)
+}
+const KINDS = ['switched', 'low effort', 'kept', 'hand-off'] as const
+/** The class a decision's cost is averaged under; the raw `chose` names the model, which would split "kept" into many rows. */
+const kind = (d: Decision): (typeof KINDS)[number] =>
+  d.chose === NEW_SESSION ? 'hand-off' : d.chose === LOW_EFFORT ? 'low effort' : direction(d) !== 0 ? 'switched' : 'kept'
+/** Dollars at two places, or four under a cent so a cheap session does not read as $0.00. */
+const usd = (n: number) => `$${n.toFixed(n < 0.01 ? 4 : 2)}`
+
+/**
  * The log as a markdown tally: for each rating, how many sessions it rated, how many of those switched model, and of the switches
  * how many went up to a pricier tier and how many down to a cheaper one (by RANK; a pair the mod cannot rank counts as neither).
  */
@@ -314,15 +354,22 @@ function tally(list: Decision[]): string {
   if (!list.length) return 'No decisions logged yet. The mod logs one each time it rates a first prompt.'
   const rows = (Object.keys(SUGGEST) as Rating[]).map(rating => {
     const of = list.filter(d => d.rating === rating)
-    // A switch is a change of tier where both ends rank ("use opus" on claude-opus-5-5 is none); unrankable names compare as text.
-    const dir = (d: Decision) => {
-      const [a, b] = [rank(d.from), rank(d.to)]
-      return a === undefined || b === undefined ? (d.to === d.from ? 0 : undefined) : Math.sign(b - a)
-    }
-    const switched = of.filter(d => dir(d) !== 0)
-    return `| ${rating} | ${of.length} | ${switched.length} | ${switched.filter(d => dir(d) === 1).length} | ${switched.filter(d => dir(d) === -1).length} |`
+    const switched = of.filter(d => direction(d) !== 0)
+    return `| ${rating} | ${of.length} | ${switched.length} | ${switched.filter(d => direction(d) === 1).length} | ${switched.filter(d => direction(d) === -1).length} |`
   })
-  return `${list.length} decision${list.length === 1 ? '' : 's'} logged (the newest ${LOG_CAP} are kept).\n\n| Rating | Rated | Switched model | Up (pricier) | Down (cheaper) |\n| --- | --- | --- | --- | --- |\n${rows.join('\n')}`
+  const counts = `${list.length} decision${list.length === 1 ? '' : 's'} logged (the newest ${LOG_CAP} are kept).\n\n| Rating | Rated | Switched model | Up (pricier) | Down (cheaper) |\n| --- | --- | --- | --- | --- |\n${rows.join('\n')}`
+  const costed = list.filter(d => typeof d.cost === 'number')
+  if (!costed.length) return counts
+  const costs = (Object.keys(SUGGEST) as Rating[]).flatMap(rating =>
+    KINDS.flatMap(k => {
+      const of = costed.filter(d => d.rating === rating && kind(d) === k)
+      return of.length ? [`| ${rating} | ${k} | ${of.length} | ${usd(of.reduce((sum, d) => sum + d.cost!, 0) / of.length)} |`] : []
+    }),
+  )
+  return (
+    `${counts}\n\nAverage cost of a session after its decision, in US dollars:\n\n| Rating | Choice | Sessions | Average cost |\n| --- | --- | --- | --- |\n` +
+    `${costs.join('\n')}\n\nSessions differ in task, so this shows association, not cause.`
+  )
 }
 
 /**
@@ -421,6 +468,8 @@ export const register: Register = (on, options) => {
   let busy = false
   // The band's result row after a Refine, shown over the show rule until Done, Restore original or a send.
   let result: { original: string; issues: string[]; plan: boolean; expanded: boolean } | undefined
+  // The decision this session last logged, so each main-loop turn can record what the session has cost since.
+  let tracked: Tracked | undefined
 
   /** The main-loop model as the log names it: the override, or the session's own. */
   const onModel = (current: string) => model ?? current
@@ -586,7 +635,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'refine-prompt', description: 'Review a prompt and put an improved one in the prompt box', argumentHint: '<prompt>' })
-    await $.command.register({ name: 'triage-stats', description: 'Show how often each rating led to a model switch' })
+    await $.command.register({ name: 'triage-stats', description: 'Show how often each rating led to a model switch, and what those sessions cost' })
     return next(e)
   })
 
@@ -615,6 +664,8 @@ export const register: Register = (on, options) => {
       $.ui.toast('No desktop app attached; sent in this session')
     }
     if ((await $.session.turns()) > 0) return next(e)
+    // A new first prompt (as after /clear) ends the earlier decision's tracking, even when this one is not rated.
+    tracked = undefined
 
     const rated = await choose($, e, !improved)
     if (rated === undefined) return next(e)
@@ -622,7 +673,7 @@ export const register: Register = (on, options) => {
     // Dismissing and handing off change nothing here, so they are logged as chosen and the prompt goes on. Refining is not logged:
     // the rewrite is rated and logged when it is sent, and one prompt should count once.
     if (dismissed || answer === NEW_SESSION) {
-      await log($, { rating, from: onModel(current), to: onModel(current), chose: dismissed ? 'dismissed' : NEW_SESSION }).catch(() => undefined)
+      tracked = await record($, { rating, from: onModel(current), to: onModel(current), chose: dismissed ? 'dismissed' : NEW_SESSION })
     }
     if (dismissed) return next(e)
     if (answer === NEW_SESSION) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
@@ -631,15 +682,31 @@ export const register: Register = (on, options) => {
       const reviewed = await improve($, e.text, await (picks ??= loadPicks($)))
       if (reviewed !== undefined) return { drop: asLine(reviewed) }
       // No rewrite will come back to be rated, so this is the session's one entry.
-      await log($, { rating, from: onModel(current), to: onModel(current), chose: REFINE }).catch(() => undefined)
+      tracked = await record($, { rating, from: onModel(current), to: onModel(current), chose: REFINE })
       return next(e)
     }
 
     const decided = decide(rating, current, answer)
     if (decided.status) $.ui.status(line())
-    await log($, decided.entry).catch(() => undefined)
+    tracked = await record($, decided.entry)
     return next(e)
   }).catch(($, e, next) => next(e)) // a failure here never holds up the prompt
+
+  // Records, on the decision this session logged, what the session has cost since. Each turn writes the latest figure, so a write
+  // lost to another session's (see log()) is repaired by the next turn. A failure never touches the turn's answer.
+  // ponytail: one store write per turn whose cost changed; session.measure (pushed, folds bursts) is the move if that ever matters
+  on('turn.complete', async ($, e, next) => {
+    const t = tracked
+    if (e.agentId || !t) return next(e)
+    const now = (await $.session.usage()).cost?.usd
+    // Down to four places, so the figure never exceeds /cost; the 1e-6 keeps 0.19999999999999998 from storing as 0.1999.
+    const cost = now === undefined ? undefined : Math.floor((now - t.base) * 1e4 + 1e-6) / 1e4
+    if (cost !== undefined && cost !== t.last) {
+      await addCost($, t.id, cost)
+      t.last = cost
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // ponytail: rewrites each request rather than running /model, which cannot run while the prompt waits on this hook
   on('turn.step', async function* ($, e, next) {

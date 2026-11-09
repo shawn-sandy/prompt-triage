@@ -53,7 +53,6 @@ A third-party guide claimed these. Check the generated declarations before relyi
 
 - That `$.state` survives a hot reload of the mod.
 - That `cost` includes the mod's own `$.model.complete` calls.
-- That `e.agentId` is set on `turn.complete` events. The page documents it on `tool.check`.
 - Which `rateLimits[].kind` values exist, and whether the list is ever empty.
 - What happens when two mods call `$.ui.status`.
 - What `$.model.classify` takes and returns. The page lists only its name.
