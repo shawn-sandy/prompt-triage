@@ -1643,6 +1643,20 @@ test('a turn count that cannot be read leaves turns out, records the rest, and t
   expect([entry?.cost, entry?.ctx]).toEqual([1, 42])
 })
 
+test('a usage reading that fails at the end of a turn still records turns, leaves cost and ctx out, and the answer passes through', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 1], pct: [3, 42] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  s.usageFails = true
+  s.turns = 2
+  expect((await complete($, undefined, 'All done.')).text).toBe('All done.')
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry?.turns).toBe(2)
+  expect(entry && 'cost' in entry).toBe(false)
+  expect(entry && 'ctx' in entry).toBe(false)
+})
+
 test('the store still holds neither the prompt text nor the session id once turns and ctx are recorded', async ($, on) => {
   const s: Setup = { answer: 'Switch to opus', usd: [0, 2], pct: [3, 42] }
   const seen = engine(on, s)

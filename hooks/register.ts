@@ -728,8 +728,9 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const t = tracked
     if (e.agentId || !t) return next(e)
-    const usage = await $.session.usage()
-    const now = usage.cost?.usd
+    // Read apart from the turn count, so a usage reading that fails leaves cost and ctx out without losing the turns.
+    const usage = await $.session.usage().catch(() => undefined)
+    const now = usage?.cost?.usd
     // A turn count that cannot be read, or that fell below the decision's (a figure that would pull the average down), is left out.
     const count = t.turns0 === undefined ? undefined : await $.session.turns().then(n => n - t.turns0!, () => undefined)
     const read: Spend = {
@@ -737,7 +738,7 @@ export const register: Register = (on, options) => {
       cost: now === undefined ? undefined : Math.floor((now - t.base) * 1e4 + 1e-6) / 1e4,
       turns: count !== undefined && count >= 0 ? count : undefined,
       // Absent until the first response of the live window.
-      ctx: usage.context.percent,
+      ctx: usage?.context.percent,
     }
     // Only a figure that is present and differs from the one last written; the others stay as they were on the entry.
     const changed = Object.fromEntries(Object.entries(read).filter(([k, v]) => v !== undefined && v !== t.sent[k as keyof Spend])) as Spend
