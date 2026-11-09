@@ -319,7 +319,8 @@ async function record($: EngineInterface, entry: Decision): Promise<Tracked | un
   const id = crypto.randomUUID()
   const base = (await $.session.usage().catch(() => undefined))?.cost?.usd
   await log($, { ...entry, id }).catch(() => undefined)
-  return base === undefined ? undefined : { id, base }
+  // `last` starts at 0, so a turn that spent nothing since the decision writes no cost and the session stays out of the averages.
+  return base === undefined ? undefined : { id, base, last: 0 }
 }
 
 /**

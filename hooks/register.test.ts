@@ -1309,6 +1309,17 @@ test('a second turn updates the same entry, and an unchanged figure writes nothi
   expect(seen.writes()).toBe(writes)
 })
 
+test('a turn that spent nothing since the decision records no cost', async ($, on) => {
+  // An aborted turn before any priced request: the ledger still reads the baseline.
+  const seen = engine(on, { answer: 'Switch to opus', usd: [0.5, 0.5] })
+
+  await submit($, 'Redesign the auth layer')
+  const writes = seen.writes()
+  await complete($)
+  expect((seen.store.decisions as Decision[])[0]?.cost).toBeUndefined()
+  expect(seen.writes()).toBe(writes)
+})
+
 // Rounded down, so the stored figure never exceeds what /cost reports; a live session once stored 0.0116 against a 0.01155778 total.
 for (const [base, now, cost] of [
   [0, 0.01155778, 0.0115],
