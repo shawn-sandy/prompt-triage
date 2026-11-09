@@ -6,6 +6,7 @@ A Claude Code mod. [README.md](README.md) describes what it does. The entry poin
 ## Mods reference
 
 Official reference: https://code.claude.com/docs/en/plugins/mods/reference
+Interface reference: https://code.claude.com/docs/en/plugins/mods/interface
 
 Read it, or the TypeScript declarations Claude Code writes for the installed version, before
 using any event or `$` method that `hooks/register.ts` does not already use. The page says the
