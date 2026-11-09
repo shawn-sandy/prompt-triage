@@ -16,10 +16,10 @@ by an interactive session, so a fresh clone, a new worktree and CI have none.
 
 Read the interface reference before changing a UI render hook or any `$.ui` call.
 
-The page was read on 2026-11-08. It covers the CLI and Desktop app as of v2.1.290 and the VS Code
-extension as of v2.1.299. Version-gated entries say "requires v2.1.xxx" on the page.
+The official reference was read on 2026-11-08. It covers the CLI and Desktop app as of v2.1.290 and the VS Code
+extension as of v2.1.299. Version-gated entries say "requires v2.1.xxx" on the official reference.
 
-### Events worth knowing (confirmed on the page)
+### Events worth knowing (confirmed on the official reference)
 
 - `session.start`: once per loaded mod, before the first prompt, and again after a reload of that
   mod. Not after `/clear`, `/resume` or `/branch`.
@@ -31,7 +31,7 @@ extension as of v2.1.299. Version-gated entries say "requires v2.1.xxx" on the p
 - `agent.spawn`: may change the model of a subagent that is starting. Fires again for a resumed
   subagent, with `e.resume` set (requires v2.1.299).
 
-### Calls worth knowing (confirmed on the page)
+### Calls worth knowing (confirmed on the official reference)
 
 - `$.session.usage()` returns `{ startedAt, context: { tokens, window, percent }, rateLimits:
   [{ kind, percentUsed, resetsAt }], cost }`.
@@ -44,13 +44,13 @@ extension as of v2.1.299. Version-gated entries say "requires v2.1.xxx" on the p
   mod people install cannot use it to report anything. Its hooks need the filter
   `{ to: 'collector' }` or `claude plugin validate` fails.
 
-### Limits worth knowing (confirmed on the page)
+### Limits worth knowing (confirmed on the official reference)
 
 A hook gets 10 seconds per event (50 ms for `prompt.edit`), not counting time inside `next` or a
 mods API call other than `$.clock.sleep`. A `.catch` handler gets 1 second. `$.ui.toast` shows
 for 4 seconds. One `claude plugin test` test gets 5 seconds.
 
-### Not confirmed by the page
+### Not confirmed by the official reference
 
 A third-party guide claimed these. Check the generated declarations before relying on any:
 
