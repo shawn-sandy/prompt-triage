@@ -355,7 +355,7 @@ rating, `complex` scored 5/8, an interval of 31-86%, too wide to tell a
 rubric change from noise; at 40 the same score would read 47-76%. `--baseline` scores bare labels with no
 definitions instead, for comparison. The model's replies also vary between
 runs: the unchanged rubric has scored `complex` 34/40 on one run and 36/40 on
-the next. `--runs N` rates every case N times and prints each rating's mean
+the next. `--runs N` (1 to 20) rates every case N times and prints each rating's mean
 score, the count on each run, and a confusion table summed over the runs; the
 interval is taken on the mean over the cases, not over every call, since
 rating one prompt again is not a fresh sample. Compare rubric changes on the

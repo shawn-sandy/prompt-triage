@@ -21,12 +21,16 @@ const BASELINE = `Classify the text into exactly one of these labels: ${LABELS.j
 const baseline = process.argv.includes('--baseline')
 const system = baseline ? BASELINE : RATER
 // Repeat runs average out the model's own variation: the same rubric has scored a class 34/40 on one run and 36/40 on the next.
-const at = process.argv.indexOf('--runs')
-const runs = at === -1 ? 1 : Number(process.argv[at + 1])
-if (!Number.isInteger(runs) || runs < 1) {
-  console.error('--runs takes a whole number of at least 1, such as --runs 3')
+// ponytail: capped at 20 runs (3,200 paid calls, about an hour); raise MAX_RUNS if a comparison ever needs more
+const MAX_RUNS = 20
+const at = process.argv.findIndex(a => a === '--runs' || a.startsWith('--runs='))
+const raw = at === -1 ? '1' : process.argv[at].startsWith('--runs=') ? process.argv[at].slice('--runs='.length) : process.argv[at + 1]
+// Plain digits only: Number() would also take 1e21, 0x2 and 5.0, and a value too large for an array crashes after a paid call.
+if (!/^[1-9]\d*$/.test(raw ?? '') || Number(raw) > MAX_RUNS) {
+  console.error(`--runs takes a whole number from 1 to ${MAX_RUNS}, such as --runs 3`)
   process.exit(1)
 }
+const runs = Number(raw)
 
 const cases = JSON.parse(await readFile(new URL('../evals/rating-prompts.json', import.meta.url), 'utf8'))
 
