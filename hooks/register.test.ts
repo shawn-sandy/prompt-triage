@@ -96,6 +96,7 @@ function engine(on: On, s: Setup) {
     writes++
     return { value: undefined }
   })
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   // The mod rates with model.complete; a call here is counted so a test can show it never happens.
   on('model.classify', () => {
     classified++
@@ -1416,6 +1417,22 @@ test('a new first prompt, as after /clear, gets its own id and a cost that leave
   expect([a?.cost, b?.cost]).toEqual([1, 0.5])
   expect(a?.id).not.toBe(b?.id)
 })
+
+// /resume and /branch keep the mod loaded and move to a session that already has turns, so no first prompt resets the tracking.
+for (const reason of ['resume', 'clear'] as const) {
+  test(`after /${reason} the earlier decision gains none of the next session's spend`, async ($, on) => {
+    // 5 at the decision, 6 after its turn; the next session's ledger reads 0.8.
+    const s: Setup = { answer: 'Switch to opus', usd: [5, 6, 0.8] }
+    const seen = engine(on, s)
+
+    await submit($, 'Redesign the auth layer')
+    await complete($)
+    await $.session.end({ reason, sessionId: 'ended', resume: { id: 'next' } })
+    s.turns = 4
+    await complete($)
+    expect((seen.store.decisions as Decision[]).map(d => d.cost)).toEqual([1])
+  })
+}
 
 test('a first prompt that is not rated stops the earlier decision from gaining later spend', async ($, on) => {
   const s: Setup = { answer: 'Switch to opus', usd: [0, 1, 0.2] }

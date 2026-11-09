@@ -708,6 +708,13 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // /clear, /resume and /branch end the conversation but keep the mod loaded; /resume and /branch move to one that already has
+  // turns, so no first prompt would reset the tracking, and its spend (or a negative figure) would land on this session's entry.
+  on('session.end', ($, e, next) => {
+    tracked = undefined
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   // ponytail: rewrites each request rather than running /model, which cannot run while the prompt waits on this hook
   on('turn.step', async function* ($, e, next) {
     if (e.agentId) return yield* next(e)

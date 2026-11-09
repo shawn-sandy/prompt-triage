@@ -239,7 +239,7 @@ prompt, so the model dialog does not offer **Refine prompt** again for it.
 
 ## Hooks
 
-The mod registers eleven hooks in `hooks/register.ts`. `prompt.submit` and
+The mod registers twelve hooks in `hooks/register.ts`. `prompt.submit` and
 `command.run` are also the names of calls, so these hooks run whenever a
 prompt is submitted or `/model`, `/effort`, `/refine-prompt` or `/triage-stats` is run, whether you do it or
 other code (the app, another mod) does. The mod never makes either call
@@ -253,6 +253,7 @@ itself.
 | `prompt.submit` | On any prompt that is not a slash command, a meta prompt or part of a running turn while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
 | `turn.complete` | The end of each main-loop turn after a rated first prompt. Subagent turns pass through untouched. | Changes nothing in the turn. Reads the session's cost and, when it changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
+| `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Stops recording cost onto the ended session's entry. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given with the band's picks, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/triage-stats` only) | Each run of `/triage-stats`. | Reads the decision log from the store and prints the tally. Changes nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
@@ -324,8 +325,8 @@ request at all.
   turn that changes a session's cost rewrites the list too, which makes such a
   loss more likely; a lost cost is put back by that session's next turn.
 - A session's cost is everything the session spent after its decision was
-  logged, including subagents and any other mod's model calls, until the next
-  first prompt (as after `/clear`) starts a new entry. An entry already pushed
+  logged, including subagents and any other mod's model calls, until the
+  session ends or `/clear`, `/resume` or `/branch` runs. An entry already pushed
   out by the 200-entry cap is not updated or added back.
 - Sessions differ in task, so the cost table shows which choices went with
   cheaper sessions, not that a choice made them cheaper. `/triage-stats` says
@@ -404,7 +405,7 @@ node scripts/eval-rating.mjs --runs 3
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the eleven hooks and the `/refine-prompt` and `/triage-stats` commands. |
+| `hooks/register.ts` | All of the mod's logic: the twelve hooks and the `/refine-prompt` and `/triage-stats` commands. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
 | `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`, once or averaged over `--runs N`. |

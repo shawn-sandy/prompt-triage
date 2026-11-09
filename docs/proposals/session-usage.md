@@ -96,8 +96,9 @@ to nothing. When the `prompt.submit` hook logs an entry it also reads
 `$.session.usage()` once as a baseline. A `turn.complete` hook, on the main loop
 only, reads the cost again and writes the spend since the baseline, rounded down
 to four places so it never exceeds `/cost`, onto the entry with that `id`, skipping the write when the figure
-has not changed. It never appends. A new first prompt (as after `/clear`) stops
-the earlier entry's updates, so the baseline makes the figure right whether or
+has not changed. It never appends. A `session.end` hook (which also fires on
+`/clear`, `/resume` and `/branch`) and any new first prompt stop the earlier
+entry's updates, so the baseline makes the figure right whether or
 not the ledger resets, and the rating call is left out.
 
 Why each turn and not `session.end`: an end-of-session write shares the 1.5
