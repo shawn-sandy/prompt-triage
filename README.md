@@ -84,7 +84,8 @@ desktop app it can also hand a complex or long-running task to a new session.
 8. Each rating also sets a minimum effort: none for simple, `medium` for
    moderate, `high` for complex and long-running. See [Effort](#effort).
 9. Every decision is written to a log in the mod's store, along with what the
-   session cost after it, and `/triage-stats` prints the tally. See
+   session cost, how many turns it ran and how full its context got after it,
+   and `/triage-stats` prints the tally. See
    [The decision log](#the-decision-log).
 
 The switch applies to the main conversation's requests for the rest of the
@@ -152,7 +153,20 @@ rating call itself is left out. The figure is updated at the end of each
 main-loop turn; subagent turns do not write it. When at least one entry has a
 cost, `/triage-stats` adds a second table: for each rating and choice (switched
 model, low effort, kept the model, or handed off to a new session), how many
-sessions have a cost and their average. Neither the log nor the command makes a
+sessions have a cost and their average.
+
+The same update also sets two more optional numbers on the entry. `turns` is how
+many turns the session has completed since the decision was logged, counted from
+the turn count at that moment, so a conversation that follows a `/clear` does not
+inherit the cleared one's turns. `ctx` is the share of the context window in use,
+as a whole percent, at the end of the latest turn; it is left out until the
+session has had its first response, and it can fall after a compaction. Each is
+left out when it cannot be read, and `turns` is also left out when the count has
+fallen below what it was at the decision. When at least one entry has either,
+`/triage-stats` adds a table with one row per rating: the average turns, the
+average context percent, and beside each the number of sessions that had that
+figure. An entry missing one figure is left out of that average only, and a
+rating with neither figure gets no row. Neither the log nor the command makes a
 model request.
 
 ## Improving a prompt
@@ -252,8 +266,8 @@ itself.
 | `prompt.edit`, `prompt.change` | Each change to the prompt box. | Change nothing. Redraw the band when the draft starts or stops meeting the `band` setting. |
 | `prompt.submit` | On any prompt that is not a slash command, a meta prompt or part of a running turn while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
-| `turn.complete` | The end of each main-loop turn after a rated first prompt. Subagent turns pass through untouched. | Changes nothing in the turn. Reads the session's cost and, when it changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
-| `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Stops recording cost onto the ended session's entry, and after `/clear` marks the next prompt to be rated as a first prompt. |
+| `turn.complete` | The end of each main-loop turn after a rated first prompt. Subagent turns pass through untouched. | Changes nothing in the turn. Reads the session's cost, turn count and context percent and, for each that changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
+| `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Stops recording onto the ended session's entry, and after `/clear` marks the next prompt to be rated as a first prompt. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given with the band's picks, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/triage-stats` only) | Each run of `/triage-stats`. | Reads the decision log from the store and prints the tally. Changes nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
@@ -322,15 +336,19 @@ request at all.
   since the store has no atomic update. Two sessions rating their first
   prompt within the same few milliseconds can lose one entry. This is
   accepted: the log is a tally, and a missing row costs nothing else. Each
-  turn that changes a session's cost rewrites the list too, which makes such a
-  loss more likely; a lost cost is put back by that session's next turn.
+  turn that changes a session's cost, turn count or context percent rewrites
+  the list too, which makes such a loss more likely; a lost figure is put back
+  by that session's next turn.
 - A session's cost is everything the session spent after its decision was
   logged, including subagents and any other mod's model calls, until the
   session ends or `/clear`, `/resume` or `/branch` runs. An entry already pushed
   out by the 200-entry cap is not updated or added back.
-- Sessions differ in task, so the cost table shows which choices went with
-  cheaper sessions, not that a choice made them cheaper. `/triage-stats` says
-  so under the table.
+- `turns` and `ctx` are recorded only for a session that also has a cost
+  baseline, which every session in the CLI has. `ctx` is the latest reading,
+  not a peak, so a compaction late in a session lowers it.
+- Sessions differ in task, so the cost table and the turns and context table
+  show which choices went with cheaper, shorter or fuller sessions, not that a
+  choice made them so. `/triage-stats` says so under the tables.
 - Whether a request takes effort is read from the session's model. If you
   switch to a model that takes no effort setting, the status line can still
   say effort was raised, though none is sent; if the session's own model takes
@@ -357,9 +375,10 @@ model override or the effort minimum; they are held in memory for the session.
 Two things are saved in the mod's store across sessions: the band's Goal,
 Workflow and Scope picks, and the decision log under the key `decisions`, a
 list of at most 200 entries each holding the rating, the main-loop model
-before and after, the option chosen, a random id and the session's cost in US
-dollars. The id is made by the mod and is not the session id, so it points at
-no transcript. No prompt text is logged. `/triage-stats` reads it; nothing else
+before and after, the option chosen, a random id, the session's cost in US
+dollars, the turns completed since the decision and the context percent used.
+The id is made by the mod and is not the session id, so it points at no
+transcript. No prompt text is logged. `/triage-stats` reads it; nothing else
 does. It writes no
 files and makes no network requests of its own. The
 only context it adds is the new-session instruction described above, and only
