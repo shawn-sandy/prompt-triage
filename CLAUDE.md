@@ -8,11 +8,13 @@ A Claude Code mod. [README.md](README.md) describes what it does. The entry poin
 Official reference: https://code.claude.com/docs/en/plugins/mods/reference
 Interface reference: https://code.claude.com/docs/en/plugins/mods/interface
 
-Read it, or the TypeScript declarations Claude Code writes for the installed version, before
+Read the official reference, or the TypeScript declarations Claude Code writes for the installed version, before
 using any event or `$` method that `hooks/register.ts` does not already use. The page says the
 declarations are the complete reference and win over the docs when the two disagree. They are in
 `.claude-plugin/types/`, which `tsconfig.json` extends. The folder is gitignored and written only
 by an interactive session, so a fresh clone, a new worktree and CI have none.
+
+Read the interface reference before changing a UI render hook or any `$.ui` call.
 
 The page was read on 2026-11-08. It covers the CLI and Desktop app as of v2.1.290 and the VS Code
 extension as of v2.1.299. Version-gated entries say "requires v2.1.xxx" on the page.
