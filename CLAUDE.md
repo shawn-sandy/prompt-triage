@@ -99,7 +99,9 @@ with Claude Code pinned to 2.1.319, past every version gate on the page. There i
 step.
 
 Do not edit `version` in `.claude-plugin/plugin.json`. The `bump-version` workflow does it when
-a push to main changes `hooks/register.ts`, `hooks/hooks.json` or the workflow file. It reads
+a push to main changes `hooks/register.ts`, `hooks/hooks.json` or the workflow file. It opens a
+pull request for the bump, and `release-version` tags and publishes the release when that pull
+request merges. It reads
 the subject of every commit since the current version's release tag, or since the push's
 previous head when that tag is missing, not only the commits just pushed. If any of them starts
 `feat:` or `feat(scope):`, the bump is minor; otherwise it is a patch. Changes that touch none

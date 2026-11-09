@@ -1,0 +1,29 @@
+name: release-version
+
+# Tags and publishes the release when a version bump pull request from bump-version merges to main.
+# The release points at the merge commit, so it names the code that shipped on main.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'bump/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(jq -r .version .claude-plugin/plugin.json)
+          # gh creates the tag on the merge commit; a bare `git tag` + `--follow-tags` never pushed it.
+          gh release create "prompt-triage--v$version" --target "$(git rev-parse HEAD)" \
+            --title "prompt-triage v$version" --generate-notes

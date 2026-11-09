@@ -1,9 +1,11 @@
 name: bump-version
 
-# Bumps plugin.json and publishes a tagged GitHub release when the mod's code changes on main:
+# Opens a pull request that bumps plugin.json when the mod's code changes on main:
 # minor when a pushed commit subject starts with `feat:` or `feat(scope):`, patch otherwise.
+# main requires a reviewed pull request, so the bump goes through one. release-version tags and
+# publishes the release when that pull request merges.
 # Installed users only get an update when `version` changes, so each merged change must bump it.
-# The bump commit touches only plugin.json, which is outside `paths`, so it does not re-trigger.
+# The bump branch touches only plugin.json, which is outside `paths`, so it does not re-trigger.
 # This file is in `paths` so a change to the release flow is exercised by its own merge.
 on:
   push:
@@ -17,7 +19,7 @@ permissions:
   contents: write
 
 jobs:
-  # Validate and test first; a failing check stops the bump and the release.
+  # Validate and test first; a failing check stops the bump pull request.
   check:
     uses: ./.github/workflows/check.yml
 
@@ -25,18 +27,18 @@ jobs:
     needs: check
     runs-on: ubuntu-latest
     steps:
-      # main requires PRs; this App is on the ruleset's bypass list so the bump commit can push.
       - id: app-token
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ vars.BUMP_APP_ID }}
           private-key: ${{ secrets.BUMP_APP_PRIVATE_KEY }}
-          permission-contents: write # the token needs only checkout, push and release
+          permission-contents: write # pushes the bump branch
+          permission-pull-requests: write # opens the bump pull request
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0 # the subjects of every pushed commit are read below
           token: ${{ steps.app-token.outputs.token }}
-      - name: Bump version and release
+      - name: Open the version bump pull request
         env:
           BEFORE: ${{ github.event.before }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -50,11 +52,21 @@ jobs:
           else
             next=$(echo "$current" | awk -F. -v OFS=. '{ $NF++; print }')
           fi
+          branch="bump/v$next"
+          git switch -c "$branch"
           sed -i -E "s/(\"version\": \")[^\"]+/\1$next/" .claude-plugin/plugin.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "chore: bump version to $next"
-          git push
-          # gh creates the tag on the bump commit; a bare `git tag` + `--follow-tags` never pushed it.
-          gh release create "prompt-triage--v$next" --target "$(git rev-parse HEAD)" \
-            --title "prompt-triage v$next" --generate-notes
+          # The bump branch belongs to this workflow, so a rerun may replace an older push of it.
+          git push --force origin "$branch"
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            gh pr create --base main --head "$branch" --title "chore: bump version to $next" \
+              --body "Bumps plugin.json to $next. Merging this pull request publishes the release."
+          fi
+          # Close older bump pull requests this one supersedes, so only one version bump stays open.
+          gh pr list --state open --limit 100 --json number,headRefName \
+            | jq -r --arg b "$branch" '.[] | select(.headRefName | startswith("bump/v")) | select(.headRefName != $b) | .number' \
+            | while read -r number; do
+              gh pr close "$number" --comment "Superseded by $branch."
+            done
