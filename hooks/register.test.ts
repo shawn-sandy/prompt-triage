@@ -1295,3 +1295,40 @@ test('keeping the named model switches nothing and is logged by its label', asyn
   expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
   expect((seen.store.decisions as Decision[])[0]?.chose).toBe('Keep claude-opus-5-5')
 })
+
+// --- Tier-relative wording: a suggestion two or more tiers up says so, in tiers and never in prices ---
+
+test('a suggestion two tiers above the current model says so, and states no price', async ($, on) => {
+  const seen = engine(on, { rating: 'complex', model: 'claude-haiku-5-5', answer: 'Keep claude-haiku-5-5' })
+
+  await submit($, 'Redesign the auth layer')
+  expect(seen.questions[0]).toMatch(/two tiers above your current model/)
+  // Prices go stale, so the dialog never carries a dollar amount.
+  expect(seen.questions[0]).not.toContain('$')
+})
+
+test('a suggestion three tiers above the current model says three', async ($, on) => {
+  const seen = engine(on, { rating: 'long-running', model: 'claude-haiku-5-5', answer: 'Keep claude-haiku-5-5' })
+
+  await submit($, 'Migrate the whole codebase from Express to Fastify')
+  expect(seen.questions[0]).toMatch(/three tiers above your current model/)
+  expect(seen.questions[0]).not.toContain('$')
+})
+
+for (const [rating, model] of [['complex', 'claude-sonnet-5-5'], ['moderate', 'claude-haiku-5-5']] as const) {
+  test(`a ${rating} suggestion one tier above ${model} carries no tier wording`, async ($, on) => {
+    const seen = engine(on, { rating, model, answer: `Keep ${model}` })
+
+    await submit($, 'Redesign the auth layer')
+    // A switch is offered, so the dialog did show; it just has nothing to add at one tier.
+    expect(seen.asked.length).toBe(1)
+    expect(seen.questions[0]).not.toMatch(/tier/i)
+  })
+}
+
+test('a model the mod cannot rank gets no tier wording', async ($, on) => {
+  const seen = engine(on, { rating: 'moderate', model: 'Default (recommended)', answer: 'Keep Default (recommended)' })
+
+  await submit($, 'Add a retry limit to the upload client')
+  expect(seen.questions[0]).not.toMatch(/tier/i)
+})

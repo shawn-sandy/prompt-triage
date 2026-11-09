@@ -35,6 +35,14 @@ desktop app it can also hand a complex or long-running task to a new session.
    [Evaluating the rating](#evaluating-the-rating)), so the tier below is one
    click away rather than something to type under "Other". No other rating
    offers a step down.
+
+   When the suggestion ranks two or more tiers above your current model, the
+   question also says so, for example `Opus is two tiers above your current
+   model.` (`three` for a `long-running` prompt on Haiku). The tiers are
+   haiku, sonnet, opus, then fable (Mythos ranks with Fable). The wording is a
+   count of tiers, never a price or dollar amount, since prices change and the
+   mod would then state a wrong number. A one-tier step, or a model the mod
+   cannot rank such as `Default (recommended)`, gets no such sentence.
 3. For a `simple` prompt the dialog's first option is **Keep model, effort
    low**: it keeps your model and runs the main conversation at effort `low`,
    since lowering effort is often a better lever than switching models. The

@@ -18,6 +18,8 @@ const ALIASES = ['haiku', 'sonnet', 'opus', 'fable'] as const
 const RANK: Record<string, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3, mythos: 3 }
 /** The model's rank, or undefined for a name that holds no known family, such as "Default (recommended)". */
 const rank = (model: string) => Object.entries(RANK).find(([family]) => model.toLowerCase().includes(family))?.[1]
+/** A tier gap in words, for the dialog; RANK spans 0 to 3, so a gap never passes three. */
+const COUNT = ['zero', 'one', 'two', 'three']
 /** The store key under which the mod logs each model and effort decision, and how many entries it keeps. */
 const LOG = 'decisions'
 // ponytail: ~100 bytes an entry, so 200 is ~20 KiB of the store's 4 MiB; raise it once /triage-stats wants a longer history
@@ -376,13 +378,17 @@ async function choose(
   const options = [...(far ? [...switches, ...lower] : [...lower, ...switches]), keep(current), ...(canHandOff ? [NEW_SESSION] : [])]
   if (options.length < 2) return { rating, current }
 
+  // A suggestion two or more tiers up is a big step, so the dialog says so in tiers. Never in prices or dollar amounts: they go stale.
+  // ponytail: tiers are counted from RANK, so a model the mod cannot rank (have undefined) gets no wording
+  const up = have === undefined ? 0 : RANK[suggested]! - have
+  const gap = !fits && up >= 2 ? ` ${suggested[0]!.toUpperCase()}${suggested.slice(1)} is ${COUNT[up] ?? up} tiers above your current model.` : ''
   // The floor is said only where it can change anything: every model's default effort is already at or above medium.
   const floor = FLOOR[rating] === 'high' ? ' Effort will be at least high.' : ''
   // The rating call already returned the reading; a simple prompt is cheap to misread, so it gets none.
   const readAs = rating === 'simple' ? undefined : reading
   // Offered only where the dialog shows anyway, so it adds no question; /refine-prompt covers the rest.
   const answer = await $.ui
-    .ask(`${readAs ? `Read as: ${readAs}. ` : ''}Rated ${rating}: ${SIZE[rating]}. You are on ${current}.${floor} Run it how?`, {
+    .ask(`${readAs ? `Read as: ${readAs}. ` : ''}Rated ${rating}: ${SIZE[rating]}. You are on ${current}.${gap}${floor} Run it how?`, {
       header: 'Model',
       options: canImprove ? [...options, REFINE] : options,
     })
