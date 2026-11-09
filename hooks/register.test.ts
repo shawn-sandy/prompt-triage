@@ -28,6 +28,10 @@ type Setup = {
   storeReadFails?: boolean
   /** Runs as each review call starts, as the person typing during the review would. */
   onReview?: () => void
+  /** The session's cost in US dollars, or one reading per `$.session.usage()` call in order; undefined leaves `cost` out. */
+  usd?: number | number[]
+  /** Every `$.session.usage()` call rejects. */
+  usageFails?: boolean
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -36,6 +40,8 @@ const REVIEWED =
 
 /** A review reply that makes the review call reject, as a dropped connection would. */
 const THROW = '<throw>'
+/** The value `$.session.id()` answers, so a test can show the store never holds it. */
+const SESSION_ID = 'session-7f3a9c'
 /** A rater reply that makes the call time out. */
 const TIMEOUT = '<timeout>'
 
@@ -61,11 +67,20 @@ function engine(on: On, s: Setup) {
   const reviews: ModelCompleteInput[] = []
   const ratings: ModelCompleteInput[] = []
   let classified = 0
+  let writes = 0
 
   on('session.turns', () => ({ value: s.turns ?? 0 }))
   on('session.model', () => ({ value: s.model ?? 'claude-sonnet-5-5' }))
   on('session.surfaces', () => ({ value: s.surfaces ?? ['terminal'] }))
   on('prompt.read', () => ({ value: { text: s.draft ?? '', cursor: (s.draft ?? '').length } }))
+  on('session.id', () => ({ value: SESSION_ID }))
+  on('session.usage', () => {
+    if (s.usageFails) throw new Error('usage unavailable')
+    const usd = Array.isArray(s.usd) ? s.usd.shift() : s.usd
+    return { value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [], ...(usd === undefined ? {} : { cost: { usd } }) } }
+  })
+  // The engine's own end of a turn beneath the plugin: the answer passes through as the text shown.
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
   // The band's Refine runs from a timer; a test moves this clock to run it.
   const clock = mock.clock(on)
   settle = clock.settle
@@ -78,8 +93,10 @@ function engine(on: On, s: Setup) {
   on('store.set', (_$, e) => {
     if (s.storeFails) throw new Error('store full')
     store[e.key] = JSON.parse(JSON.stringify(e.value))
+    writes++
     return { value: undefined }
   })
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   // The mod rates with model.complete; a call here is counted so a test can show it never happens.
   on('model.classify', () => {
     classified++
@@ -145,7 +162,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { store, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
+  return { writes: () => writes, store, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -169,6 +186,11 @@ async function step($: Engine, agentId?: string, effort?: TurnStepInput['effort'
     ...(effort !== undefined ? { effort } : {}),
   })
   for await (const _ of stream);
+}
+
+/** Ends one turn of the main loop, or of a subagent's, with `answer` as its text; returns the text shown. */
+async function complete($: Engine, agentId?: string, answer = 'Done.') {
+  return await $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', ...(agentId ? { agentId } : {}) })
 }
 
 test('a complex first prompt offers opus, and picking it routes main-loop requests to opus', async ($, on) => {
@@ -1116,13 +1138,13 @@ for (const surface of SURFACES) {
 // --- The decision log and /triage-stats ---
 
 /** One logged decision, as the store holds it. */
-type Decision = { rating: string; from: string; to: string; chose: string }
+type Decision = { rating: string; from: string; to: string; chose: string; id?: string; cost?: number }
 
 test('a rated first prompt appends one decision naming the rating, the models before and after and the choice', async ($, on) => {
   const seen = engine(on, { answer: 'Switch to opus' })
 
   await submit($, 'Redesign the auth layer across three services')
-  expect(seen.store.decisions).toEqual([{ rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus' }])
+  expect(seen.store.decisions).toEqual([expect.objectContaining({ rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus' })])
 })
 
 test('a prompt that shows no dialog is logged as asked nothing, and a dismissed dialog as dismissed', async ($, on) => {
@@ -1171,7 +1193,7 @@ test('free text under Other is logged as the model it names, never the text itse
 
   await submit($, 'Redesign the auth layer')
   const [entry] = seen.store.decisions as Decision[]
-  expect(entry).toEqual({ rating: 'complex', from: 'claude-sonnet-5-5', to: 'sonnet', chose: 'other: sonnet' })
+  expect(entry).toEqual(expect.objectContaining({ rating: 'complex', from: 'claude-sonnet-5-5', to: 'sonnet', chose: 'other: sonnet' }))
   expect(JSON.stringify(seen.store)).not.toContain('Stripe')
 })
 
@@ -1198,7 +1220,7 @@ test('a Refine whose review fails sends the prompt and logs the rated session as
 
   await submit($, 'Redesign the auth layer')
   expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
-  expect(seen.store.decisions).toEqual([{ rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Refine prompt' }])
+  expect(seen.store.decisions).toEqual([expect.objectContaining({ rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Refine prompt' })])
 })
 
 test('refining then sending the rewrite logs one decision, for the rewrite', async ($, on) => {
@@ -1247,6 +1269,259 @@ test('/triage-stats with nothing logged says so', async ($, on) => {
 
   const { text } = await command($, 'triage-stats')
   expect(text).toContain('No decisions')
+})
+
+// --- What each rated session cost, on the decision that started it ---
+
+test('a main-loop turn records the spend since the decision on that entry, with an opaque id', async ($, on) => {
+  // 0.25 is read when the decision is logged, 0.67 when the turn ends.
+  const seen = engine(on, { answer: 'Switch to opus', usd: [0.25, 0.67] })
+
+  await submit($, 'Redesign the auth layer across three services')
+  await complete($)
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry?.cost).toBe(0.42)
+  expect(typeof entry?.id).toBe('string')
+  const { text } = await command($, 'triage-stats')
+  expect(text).toContain('| complex | switched | 1 | $0.42 |')
+})
+
+test("a subagent's turn leaves the log as it was", async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus', usd: [0, 1] })
+
+  await submit($, 'Redesign the auth layer')
+  const before = JSON.stringify(seen.store)
+  await complete($, 'sub-1')
+  expect(JSON.stringify(seen.store)).toBe(before)
+})
+
+test('a second turn updates the same entry, and an unchanged figure writes nothing', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus', usd: [0.1, 0.3, 0.5, 0.5] })
+
+  await submit($, 'Redesign the auth layer')
+  await complete($)
+  await complete($)
+  const list = seen.store.decisions as Decision[]
+  expect(list.length).toBe(1)
+  expect(list[0]?.cost).toBe(0.4)
+  const writes = seen.writes()
+  await complete($)
+  expect(seen.writes()).toBe(writes)
+})
+
+test('a turn that spent nothing since the decision records no cost', async ($, on) => {
+  // An aborted turn before any priced request: the ledger still reads the baseline.
+  const seen = engine(on, { answer: 'Switch to opus', usd: [0.5, 0.5] })
+
+  await submit($, 'Redesign the auth layer')
+  const writes = seen.writes()
+  await complete($)
+  expect((seen.store.decisions as Decision[])[0]?.cost).toBeUndefined()
+  expect(seen.writes()).toBe(writes)
+})
+
+// Rounded down, so the stored figure never exceeds what /cost reports; a live session once stored 0.0116 against a 0.01155778 total.
+for (const [base, now, cost] of [
+  [0, 0.01155778, 0.0115],
+  [0.1, 0.30000000000000004 + 0.123456, 0.3234],
+  // 0.3 - 0.1 is 0.19999999999999998 in floating point, which must still store as 0.2.
+  [0.1, 0.3, 0.2],
+] as const) {
+  test(`a spend of ${now} - ${base} is stored rounded down to four places, as ${cost}`, async ($, on) => {
+    const seen = engine(on, { answer: 'Switch to opus', usd: [base, now] })
+
+    await submit($, 'Redesign the auth layer')
+    await complete($)
+    expect((seen.store.decisions as Decision[])[0]?.cost).toBe(cost)
+  })
+}
+
+test('the store holds neither the prompt text nor the session id', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus', usd: [0, 2] })
+
+  await submit($, 'Redesign the Zanzibar auth layer')
+  await complete($)
+  const all = JSON.stringify(seen.store)
+  expect(all).not.toContain('Zanzibar')
+  expect(all).not.toContain(SESSION_ID)
+})
+
+for (const [chose, setup] of [
+  ['dismissed', {}],
+  ['Open in a new session', { surfaces: ['desktop'], answer: 'Open in a new session' }],
+  ['Refine prompt', { answer: 'Refine prompt' }],
+  ['Switch to opus', { answer: 'Switch to opus' }],
+] as [string, Setup][]) {
+  test(`a decision logged as ${chose} carries an id`, async ($, on) => {
+    const seen = engine(on, setup)
+
+    await submit($, 'Redesign the auth layer')
+    const [entry] = seen.store.decisions as Decision[]
+    expect(entry?.chose).toBe(chose)
+    expect(typeof entry?.id).toBe('string')
+  })
+}
+
+for (const [name, setup] of [
+  ['a rejected usage reading', { usageFails: true }],
+  ['a usage reading with no cost', {}],
+] as const) {
+  test(`${name} writes nothing and the answer passes through`, async ($, on) => {
+    const seen = engine(on, { answer: 'Switch to opus', ...setup })
+
+    await submit($, 'Redesign the auth layer')
+    const before = JSON.stringify(seen.store)
+    const shown = await complete($, undefined, 'All done.')
+    expect(shown.text).toBe('All done.')
+    expect(JSON.stringify(seen.store)).toBe(before)
+  })
+}
+
+test('a failed store read or write leaves the log as it was and the answer passes through', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 1, 2] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  const before = JSON.stringify(seen.store)
+  s.storeReadFails = true
+  expect((await complete($, undefined, 'All done.')).text).toBe('All done.')
+  s.storeReadFails = false
+  s.storeFails = true
+  expect((await complete($, undefined, 'All done.')).text).toBe('All done.')
+  expect(JSON.stringify(seen.store)).toBe(before)
+})
+
+// A live /clear left the next prompt unrated: the turn count can still include the cleared conversation's prompts.
+test('the first prompt after /clear is rated and logged as its own decision, even while the turn count is not zero', async ($, on) => {
+  const s: Setup = { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await complete($)
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 3
+  await submit($, 'Redesign the billing layer')
+  await complete($)
+  // Only that one prompt counts as first: the next one in the cleared conversation is not rated.
+  await submit($, 'Now add tests for it')
+  const list = seen.store.decisions as Decision[]
+  expect(list.map(d => [d.rating, d.chose, d.cost])).toEqual([
+    ['complex', 'Switch to opus', 1],
+    ['complex', 'Keep claude-sonnet-5-5', 0.5],
+  ])
+  expect(seen.ratings.length).toBe(2)
+})
+
+test('the next prompt after /resume is not rated, since it continues a conversation', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus' }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await $.session.end({ reason: 'resume', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 3
+  await submit($, 'Redesign the billing layer')
+  expect(seen.ratings.length).toBe(1)
+  expect((seen.store.decisions as Decision[]).length).toBe(1)
+})
+
+test('an entry pushed out by the cap is not added back', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus', usd: [0, 1] })
+
+  await submit($, 'Redesign the auth layer')
+  const old: Decision[] = Array.from({ length: 200 }, (_, i) => ({ rating: 'simple', from: 'x', to: 'x', chose: `old ${i}`, id: `o${i}` }))
+  seen.store.decisions = old
+  await complete($)
+  const list = seen.store.decisions as Decision[]
+  expect(list.length).toBe(200)
+  expect(list.some(d => d.cost !== undefined)).toBe(false)
+})
+
+test("another session's entries in the shared log are left alone", async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus', usd: [0, 1] })
+
+  await submit($, 'Redesign the auth layer')
+  // Another session logs its own decision between this session's turns.
+  const theirs: Decision = { rating: 'simple', from: 'x', to: 'haiku', chose: 'Switch to haiku', id: 'theirs', cost: 0.05 }
+  seen.store.decisions = [...(seen.store.decisions as Decision[]), theirs]
+  await complete($)
+  const list = seen.store.decisions as Decision[]
+  expect(list.map(d => d.cost)).toEqual([1, 0.05])
+  expect(list[1]).toEqual(theirs)
+})
+
+test('a new first prompt, as after /clear, gets its own id and a cost that leaves out the earlier spend', async ($, on) => {
+  // The ledger never resets: 0 at A, 1 after its turn, 1.5 at B, 2 after its turn.
+  const seen = engine(on, { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2] })
+
+  await submit($, 'Redesign the auth layer')
+  await complete($)
+  await submit($, 'Redesign the billing layer')
+  await complete($)
+  const [a, b] = seen.store.decisions as Decision[]
+  expect([a?.cost, b?.cost]).toEqual([1, 0.5])
+  expect(a?.id).not.toBe(b?.id)
+})
+
+// /resume and /branch keep the mod loaded and move to a session that already has turns, so no first prompt resets the tracking.
+for (const reason of ['resume', 'clear'] as const) {
+  test(`after /${reason} the earlier decision gains none of the next session's spend`, async ($, on) => {
+    // 5 at the decision, 6 after its turn; the next session's ledger reads 0.8.
+    const s: Setup = { answer: 'Switch to opus', usd: [5, 6, 0.8] }
+    const seen = engine(on, s)
+
+    await submit($, 'Redesign the auth layer')
+    await complete($)
+    await $.session.end({ reason, sessionId: 'ended', resume: { id: 'next' } })
+    s.turns = 4
+    await complete($)
+    expect((seen.store.decisions as Decision[]).map(d => d.cost)).toEqual([1])
+  })
+}
+
+test('a first prompt that is not rated stops the earlier decision from gaining later spend', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 1, 0.2] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await complete($)
+  // After /clear the ledger may start over, and this prompt's rating fails, so nothing new is logged.
+  s.rating = undefined
+  await submit($, 'Redesign the billing layer')
+  await complete($)
+  expect((seen.store.decisions as Decision[]).map(d => d.cost)).toEqual([1])
+})
+
+test('/triage-stats averages cost per rating and class, with the session count beside each average', async ($, on) => {
+  const decisions: Decision[] = [
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', cost: 1 },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'b', cost: 2 },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Keep claude-sonnet-5-5', id: 'c', cost: 0.5 },
+    // No cost recorded: left out of every average.
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'dismissed', id: 'd' },
+    { rating: 'simple', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Keep model, effort low', id: 'e', cost: 0.004 },
+    { rating: 'long-running', from: 'claude-opus-5-5', to: 'claude-opus-5-5', chose: 'Open in a new session', id: 'f', cost: 0.1 },
+  ]
+  engine(on, { turns: 3, store: { decisions } })
+
+  const { text } = await command($, 'triage-stats')
+  expect(text).toContain('| complex | switched | 2 | $1.50 |')
+  expect(text).toContain('| complex | kept | 1 | $0.50 |')
+  expect(text).toContain('| simple | low effort | 1 | $0.0040 |')
+  expect(text).toContain('| long-running | hand-off | 1 | $0.10 |')
+  // No row for a rating and class with no costed session.
+  expect(text).not.toMatch(/\| moderate \| [a-z]/)
+  expect(text).toMatch(/association, not cause/)
+  // The rating table is unchanged.
+  expect(text).toContain('| complex | 4 | 2 | 2 | 0 |')
+})
+
+test('/triage-stats shows no cost table when no entry has a cost', async ($, on) => {
+  const decisions: Decision[] = [{ rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus' }]
+  engine(on, { turns: 3, store: { decisions } })
+
+  const { text } = await command($, 'triage-stats')
+  expect(text).not.toMatch(/cost/i)
+  expect(text).not.toContain('$')
 })
 
 test('a simple prompt two tiers above haiku lists the switch before the low-effort option', async ($, on) => {

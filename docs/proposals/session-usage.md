@@ -65,13 +65,14 @@ after `/clear`, `/resume` or `/branch`.
 Not settled by the page, to be read from the generated declarations in
 `.claude-plugin/types/` (written only by an interactive session):
 
-- the unit of `cost`, and whether it includes the mod's own `$.model.complete`
-  calls
+- whether `cost` includes the mod's own `$.model.complete` calls
 - whether `rateLimits` can be empty, and which `kind` values exist
 - whether `$.state` survives a reload of the mod
-- whether `e.agentId` is set on `turn.complete`, so subagent turns can be told
-  apart (the reference documents it on `tool.check`, and the mod already relies
-  on it in `turn.step`)
+
+Since settled by the declarations Claude Code 2.1.319 writes: `cost` is
+`{ usd }`, US dollars summed over every priced API response, as `/cost` totals
+it; and `turn.complete` carries `agentId` on a subagent's turn and leaves it out
+on the main loop.
 
 ## Goals and non-goals
 
@@ -85,58 +86,36 @@ cost-evidence.md rules all four out and nothing here changes that.
 
 Closes: "the log counts choices, not outcomes".
 
-`Decision` gains optional `id` (from `$.session.id()`), `cost`, `turns` and `ctx`
-(context percent). The entry is still appended where it is today, in the
-`prompt.submit` hook through `log()`, carrying only `id`. A new `session.end`
-hook reads `$.session.usage()` and `$.session.turns()` once and, if an entry
-with that `id` exists, writes the three numbers onto it.
+Shipped by `docs/plans/add-session-cost-to-decision-log.md`, in a different
+shape from the one first proposed here.
 
-`/triage-stats` then adds, for each rating, the number of sessions that ended
-with a recorded cost and their average cost, split into "switched" and "kept".
-A hand-off, logged as **Open in a new session** with `from` equal to `to`, gets
-its own line rather than counting as "kept": the task ran in another session, so
-the short session that logged it says nothing about keeping the model.
-**Every average prints with its count beside it.** The log keeps at most 200
-entries, so each cell is small, and an average of two sessions should look like
-one.
+`Decision` gains optional `id` and `cost`. The `id` is random
+(`crypto.randomUUID()`), not `$.session.id()`: the session id is the transcript
+file's name, so storing it would point at a private file, while a random id links
+to nothing. When the `prompt.submit` hook logs an entry it also reads
+`$.session.usage()` once as a baseline. A `turn.complete` hook, on the main loop
+only, reads the cost again and writes the spend since the baseline, rounded down
+to four places so it never exceeds `/cost`, onto the entry with that `id`, skipping the write when the figure
+has not changed. It never appends. A `session.end` hook (which also fires on
+`/clear`, `/resume` and `/branch`) and any new first prompt stop the earlier
+entry's updates, so the baseline makes the figure right whether or
+not the ledger resets, and the rating call is left out.
 
-Why not write the whole entry once, at the end: the reference lists the reasons
-`session.end` fires, and a killed process is not among them, so a decision
-logged only at the end could be lost. Logging at the decision and updating at
-the end keeps the entry either way.
+Why each turn and not `session.end`: an end-of-session write shares the 1.5
+second `session.end` budget and is lost when the process is killed, while a
+per-turn write always leaves the latest figure behind. A write lost to another
+session's unlocked update is repaired by the next turn.
 
-**What it can and cannot support.** Sessions differ in task, so the table shows
-that sessions which took a switch tend to cost more or less. It does not show
-the switch caused it. Say so in the command's output, once.
+`/triage-stats` adds a second table when any entry has a cost: for each rating
+and class (switched, low effort, kept, hand-off) with a costed session, the
+session count and the average in US dollars. A hand-off gets its own row: the
+task ran in another session. **Every average prints with its count beside it**,
+and the output says once that sessions differ in task, so it shows association,
+not cause.
 
-**Limits to state.**
-
-- The unit of `cost` is not confirmed. Label the column "cost", not "$", until
-  the declarations say.
-- `ctx` read at the end can be low after a compaction. If the numbers mislead,
-  track the highest value seen from `session.measure` instead.
-- `/clear`, `/resume` and `/branch` also fire `session.end`. Whether the
-  conversation after one is rated again is untested (spike 1 below).
-- There are now two writers per session. `log()` already accepts a lost entry
-  from an unlocked read-then-write. If lost updates show up, its own upgrade
-  path applies: a key per session, merged by `/triage-stats`, which `$.store`
-  supports through `keys`.
-
-**Data.** Three numbers and one opaque id per decision; no prompt text, no
-network request. A sample entry measured 99 bytes today and 177 bytes with the
-new fields (the id length is assumed to be uuid-sized), so the 200-entry cap
-holds about 35 KB of the 4 MiB store.
-
-**Proof.** Tests in the "decision log and /triage-stats" block of
-`hooks/register.test.ts`; the `engine()` helper there needs stubs for
-`session.usage` and `session.id`:
-
-1. `session.end` writes cost, turns and ctx onto the entry with the matching
-   `id` and leaves other entries alone.
-2. A failing `session.usage` or store leaves the log unchanged and does not
-   throw.
-3. `/triage-stats` shows each average with its count, and shows that no cost was
-   recorded when none was.
+`turns` and `ctx` were left out and remain the data D needs. If lost updates
+show up, `log()`'s own upgrade path applies: a key per session, merged by
+`/triage-stats` through `$.store.keys`.
 
 ## B. Keep the override across reloads
 
