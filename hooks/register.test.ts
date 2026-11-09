@@ -809,6 +809,18 @@ test('Run in hands off a later prompt in the session, not only the first', async
   expect(handsOff(seen.submitted[0])).toBe(true)
 })
 
+// The desktop band stays up while a turn runs, so the pick is often made then, and the prompt sent over that turn carries its turnId.
+test('Run in hands off a prompt typed over a running turn, and the next idle prompt stays here', async ($, on) => {
+  const seen = engine(on, { surfaces: ['desktop'], turns: 1 })
+
+  const band = await armHandOff($)
+  await $.prompt.submit({ text: 'Redesign the auth layer', wait: false, origin: { kind: 'composer' }, turnId: 't1' } as never)
+  expect(handsOff(seen.submitted[0])).toBe(true)
+  expect((await band.find({ key: 'run-in' }))?.props.value).toBe('here')
+  await submit($, 'Now add tests')
+  expect(handsOff(seen.submitted[1])).toBe(false)
+})
+
 test('the terminal band has no Run in, and an armed pick with no desktop attached sends here with a toast', async ($, on) => {
   const s: { surfaces: RenderSurface[]; turns: number } = { surfaces: ['terminal'], turns: 1 }
   const seen = engine(on, s)
