@@ -548,6 +548,8 @@ export const register: Register = (on, options) => {
           ],
           onSelect: (value: string) => {
             handOff = value === 'new'
+            // Redrawn so the picker shows the armed pick; until then the band still drew This session.
+            redraw()
           },
         })
       : null
@@ -682,8 +684,9 @@ export const register: Register = (on, options) => {
     }
     if (e.command || e.isMeta) return next(e)
     // An armed Run in pick goes before the running-turn and first-prompt checks, so it hands off any prompt, including one typed
-    // over a running turn (the desktop band stays up then); the new session rates it there.
-    if (handOff) {
+    // over a running turn (the desktop band stays up then); the new session rates it there. Only the person's own prompt takes it:
+    // a notification or a peer's message, which can arrive at any time, leaves the pick armed.
+    if (handOff && (e.origin.kind === 'composer' || e.origin.kind === 'bridge')) {
       handOff = false
       $.ui.invalidate('ui.render')
       if ((await $.session.surfaces()).includes('desktop')) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
