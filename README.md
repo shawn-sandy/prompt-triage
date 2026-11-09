@@ -60,8 +60,9 @@ desktop app it can also hand a complex or long-running task to a new session.
    press Enter: the prompt is sent with the same instruction, with no rating
    and no model dialog, since the new session rates its own first prompt. The
    pick applies to that one send, then reads **This session** again. A prompt
-   typed while Claude is still working runs in this session and leaves the
-   pick armed for your next send. If the
+   typed while Claude is still working is handed off the same way. Only a
+   prompt you send takes the pick: a background task's notification or
+   another session's message leaves it armed for your next send. If the
    desktop app has detached by the time you send, the prompt runs in this
    session and a toast says why. The terminal draws no Run in picker.
 
@@ -264,7 +265,7 @@ itself.
 | `session.start` | Each session start. | Registers the `/refine-prompt` and `/triage-stats` commands. |
 | `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, unless a survey holds the band. | Draws the refine band (Goal, Workflow and Scope pickers and **Refine**, or the result row after a refine) when the draft meets the `band` setting, and in the desktop app the **Run in** picker, above whatever else draws the band. **Refine** puts its rewrite in the prompt box and **Restore original** puts the draft back; nothing else changes until you send. |
 | `prompt.edit`, `prompt.change` | Each change to the prompt box. | Change nothing. Redraw the band when the draft starts or stops meeting the `band` setting. |
-| `prompt.submit` | On any prompt that is not a slash command, a meta prompt or part of a running turn while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
+| `prompt.submit` | On any prompt you send (typed, including over a running turn, or through Remote Control) that is not a slash command or a meta prompt while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`, when no turn is running. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
 | `turn.complete` | The end of each main-loop turn after a rated first prompt. Subagent turns pass through untouched. | Changes nothing in the turn. Reads the session's cost, turn count and context percent and, for each that changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
 | `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Stops recording onto the ended session's entry, and after `/clear` marks the next prompt to be rated as a first prompt. |
