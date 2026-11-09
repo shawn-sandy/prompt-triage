@@ -353,7 +353,13 @@ interval beside each percentage, a confusion table and the number of replies
 that named no rating. The interval is the point: at the earlier 8 cases per
 rating, `complex` scored 5/8, an interval of 31-86%, too wide to tell a
 rubric change from noise; at 40 the same score would read 47-76%. `--baseline` scores bare labels with no
-definitions instead, for comparison. It needs Node 24 and a signed-in Claude
+definitions instead, for comparison. The model's replies also vary between
+runs: the unchanged rubric has scored `complex` 34/40 on one run and 36/40 on
+the next. `--runs N` rates every case N times and prints each rating's mean
+score, the count on each run, and a confusion table summed over the runs; the
+interval is taken on the mean over the cases, not over every call, since
+rating one prompt again is not a fresh sample. Compare rubric changes on the
+mean of several runs, not on one. It needs Node 24 and a signed-in Claude
 Code, not an API key, and it turns off user settings, MCP servers and skills so
 an installed prompt-triage cannot rate the eval's own prompts. The CLI adds its
 own system context, so scores are close to the mod's call but not identical.
@@ -361,6 +367,7 @@ own system context, so scores are close to the mod's call but not identical.
 ```bash
 node scripts/eval-rating.mjs
 node scripts/eval-rating.mjs --baseline
+node scripts/eval-rating.mjs --runs 3
 ```
 
 ### Layout
@@ -370,7 +377,7 @@ node scripts/eval-rating.mjs --baseline
 | `hooks/register.ts` | All of the mod's logic: the ten hooks and the `/refine-prompt` and `/triage-stats` commands. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
-| `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`. |
+| `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`, once or averaged over `--runs N`. |
 | `hooks/hooks.json` | Points Claude Code at the mod: `{ "modules": ["./register.ts"] }`. |
 | `.claude-plugin/plugin.json` | The plugin manifest: name, `version`, description, icon. |
 | `.claude-plugin/marketplace.json` | Makes this repo a marketplace that lists the one plugin. |
