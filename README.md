@@ -376,8 +376,9 @@ Two things are saved in the mod's store across sessions: the band's Goal,
 Workflow and Scope picks, and the decision log under the key `decisions`, a
 list of at most 200 entries each holding the rating, the main-loop model
 before and after, the option chosen, a random id, the session's cost in US
-dollars, the turns completed since the decision and the context percent used. The id is made by the mod and is not the session id, so it points at
-no transcript. No prompt text is logged. `/triage-stats` reads it; nothing else
+dollars, the turns completed since the decision and the context percent used.
+The id is made by the mod and is not the session id, so it points at no
+transcript. No prompt text is logged. `/triage-stats` reads it; nothing else
 does. It writes no
 files and makes no network requests of its own. The
 only context it adds is the new-session instruction described above, and only
