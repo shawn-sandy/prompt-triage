@@ -548,6 +548,8 @@ export const register: Register = (on, options) => {
           ],
           onSelect: (value: string) => {
             handOff = value === 'new'
+            // Redrawn so the picker shows the armed pick; until then the band still drew This session.
+            redraw()
           },
         })
       : null
@@ -680,15 +682,17 @@ export const register: Register = (on, options) => {
       result = undefined
       $.ui.invalidate('ui.render')
     }
-    if (e.command || e.isMeta || e.turnId) return next(e)
-    // An armed Run in pick goes before the first-prompt check, so it hands off any prompt; the new session rates it there.
-    // ponytail: a prompt typed over a running turn (turnId) leaves the pick armed for the next idle send
-    if (handOff) {
+    if (e.command || e.isMeta) return next(e)
+    // An armed Run in pick goes before the running-turn and first-prompt checks, so it hands off any prompt, including one typed
+    // over a running turn (the desktop band stays up then); the new session rates it there. Only the person's own prompt takes it:
+    // a notification or a peer's message, which can arrive at any time, leaves the pick armed.
+    if (handOff && (e.origin.kind === 'composer' || e.origin.kind === 'bridge')) {
       handOff = false
       $.ui.invalidate('ui.render')
       if ((await $.session.surfaces()).includes('desktop')) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
       $.ui.toast('No desktop app attached; sent in this session')
     }
+    if (e.turnId) return next(e)
     // ponytail: a live /clear left the next prompt unrated, which fits the turn count still including the cleared conversation's
     // prompts; the flag rates it either way. If a later release resets the count on /clear, the flag is redundant, not wrong.
     if (!cleared && (await $.session.turns()) > 0) return next(e)
