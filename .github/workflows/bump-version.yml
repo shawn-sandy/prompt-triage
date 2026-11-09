@@ -60,8 +60,13 @@ jobs:
           git commit -am "chore: bump version to $next"
           # The bump branch belongs to this workflow, so a rerun may replace an older push of it.
           git push --force origin "$branch"
-          # ponytail: if a feat: lands before this merges, a second bump PR opens; close the older one.
           if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
             gh pr create --base main --head "$branch" --title "chore: bump version to $next" \
               --body "Bumps plugin.json to $next. Merging this pull request publishes the release."
           fi
+          # Close older bump pull requests this one supersedes, so only one version bump stays open.
+          gh pr list --state open --limit 100 --json number,headRefName \
+            | jq -r --arg b "$branch" '.[] | select(.headRefName | startswith("bump/v")) | select(.headRefName != $b) | .number' \
+            | while read -r number; do
+              gh pr close "$number" --comment "Superseded by $branch."
+            done
