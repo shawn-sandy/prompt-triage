@@ -471,6 +471,8 @@ export const register: Register = (on, options) => {
   let result: { original: string; issues: string[]; plan: boolean; expanded: boolean } | undefined
   // The decision this session last logged, so each main-loop turn can record what the session has cost since.
   let tracked: Tracked | undefined
+  // Set by a /clear, so the next prompt is rated as a first prompt even while the turn count still includes the cleared one's.
+  let cleared = false
 
   /** The main-loop model as the log names it: the override, or the session's own. */
   const onModel = (current: string) => model ?? current
@@ -664,7 +666,10 @@ export const register: Register = (on, options) => {
       if ((await $.session.surfaces()).includes('desktop')) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
       $.ui.toast('No desktop app attached; sent in this session')
     }
-    if ((await $.session.turns()) > 0) return next(e)
+    // ponytail: a live /clear left the next prompt unrated, which fits the turn count still including the cleared conversation's
+    // prompts; the flag rates it either way. If a later release resets the count on /clear, the flag is redundant, not wrong.
+    if (!cleared && (await $.session.turns()) > 0) return next(e)
+    cleared = false
     // A new first prompt (as after /clear) ends the earlier decision's tracking, even when this one is not rated.
     tracked = undefined
 
@@ -711,8 +716,10 @@ export const register: Register = (on, options) => {
 
   // /clear, /resume and /branch end the conversation but keep the mod loaded; /resume and /branch move to one that already has
   // turns, so no first prompt would reset the tracking, and its spend (or a negative figure) would land on this session's entry.
+  // /clear starts an empty conversation, so its next prompt is rated as a first prompt.
   on('session.end', ($, e, next) => {
     tracked = undefined
+    cleared = e.reason === 'clear'
     return next(e)
   }).catch(($, e, next) => next(e))
 

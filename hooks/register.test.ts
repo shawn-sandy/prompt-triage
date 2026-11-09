@@ -1391,6 +1391,39 @@ test('a failed store read or write leaves the log as it was and the answer passe
   expect(JSON.stringify(seen.store)).toBe(before)
 })
 
+// A live /clear left the next prompt unrated: the turn count can still include the cleared conversation's prompts.
+test('the first prompt after /clear is rated and logged as its own decision, even while the turn count is not zero', async ($, on) => {
+  const s: Setup = { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await complete($)
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 3
+  await submit($, 'Redesign the billing layer')
+  await complete($)
+  // Only that one prompt counts as first: the next one in the cleared conversation is not rated.
+  await submit($, 'Now add tests for it')
+  const list = seen.store.decisions as Decision[]
+  expect(list.map(d => [d.rating, d.chose, d.cost])).toEqual([
+    ['complex', 'Switch to opus', 1],
+    ['complex', 'Keep claude-sonnet-5-5', 0.5],
+  ])
+  expect(seen.ratings.length).toBe(2)
+})
+
+test('the next prompt after /resume is not rated, since it continues a conversation', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus' }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await $.session.end({ reason: 'resume', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 3
+  await submit($, 'Redesign the billing layer')
+  expect(seen.ratings.length).toBe(1)
+  expect((seen.store.decisions as Decision[]).length).toBe(1)
+})
+
 test('an entry pushed out by the cap is not added back', async ($, on) => {
   const seen = engine(on, { answer: 'Switch to opus', usd: [0, 1] })
 
