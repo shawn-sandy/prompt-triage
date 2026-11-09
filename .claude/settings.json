@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "sandbox": {
+    "excludedCommands": [
+      "git push *",
+      "git fetch *",
+      "git pull *",
+      "git ls-remote *",
+      "gh auth status",
+      "gh pr *",
+      "gh run *",
+      "gh issue *",
+      "gh api *"
+    ]
+  },
+  "permissions": {
+    "deny": [
+      "Bash(git *--upload-pack*)",
+      "Bash(git *--receive-pack*)",
+      "Bash(git *--exec*)"
+    ]
+  }
+}
