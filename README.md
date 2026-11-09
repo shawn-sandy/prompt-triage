@@ -443,8 +443,10 @@ Installed users only get an update when `version` in
 `bump-version` workflow does it when a push to `main` changes
 `hooks/register.ts`, `hooks/hooks.json` or the workflow file itself. It raises
 the minor number if a pushed commit subject starts with `feat:` or
-`feat(scope):`, and the patch number otherwise. It commits the new version and
-publishes a GitHub release tagged `prompt-triage--v<version>`.
+`feat(scope):`, and the patch number otherwise. It commits the new version to a
+`bump/v<version>` branch and opens a pull request for it. When that pull request
+merges, the `release-version` workflow publishes a GitHub release tagged
+`prompt-triage--v<version>`.
 
 Three other workflows run on GitHub: `check.yml` runs `claude plugin validate .`
 and `claude plugin test .` on every pull request, and `bump-version` runs it
