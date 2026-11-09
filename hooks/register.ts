@@ -26,11 +26,17 @@ const LOG = 'decisions'
 const LOG_CAP = 200
 /**
  * One logged decision: the rating, the main-loop model before and after, and the option chosen. `id` is random and links to nothing
- * (not the session id, which names the transcript file); it lets a later turn find the entry. `cost` is US dollars spent since the decision.
+ * (not the session id, which names the transcript file); it lets a later turn find the entry. `cost` is US dollars spent since the decision,
+ * `turns` the turns completed since it, and `ctx` the context window's percent used at the latest turn's end.
  */
-type Decision = { rating: Rating; from: string; to: string; chose: string; id?: string; cost?: number }
-/** The entry this session last logged and the session's cost when it did, so a turn can record the spend since. */
-type Tracked = { id: string; base: number; last?: number }
+type Decision = { rating: Rating; from: string; to: string; chose: string; id?: string; cost?: number; turns?: number; ctx?: number }
+/** The figures a turn records on a decision's entry. */
+type Spend = Pick<Decision, 'cost' | 'turns' | 'ctx'>
+/**
+ * The entry this session last logged, with the session's cost and turn count when it did, so a turn can record what followed.
+ * `sent` holds what was last written to the entry; `turns0` is undefined when the count could not be read then.
+ */
+type Tracked = { id: string; base: number; turns0?: number; sent: Spend }
 /** What each rating says it would take, said in the dialog beside the rating so the suggestion is read with its reason. */
 const SIZE: Record<Rating, string> = {
   simple: 'haiku or low effort would do',
@@ -312,26 +318,28 @@ async function log($: EngineInterface, entry: Decision): Promise<void> {
 }
 
 /**
- * Logs a decision under a fresh id and reads the cost so far as its baseline. Never rejects: a failed log or usage read only means
- * no cost is tracked. Undefined when there is no baseline, since a cost cannot then be told apart from earlier spend.
+ * Logs a decision under a fresh id and reads the cost and turn count so far as its baselines. Never rejects: a failed log or read only
+ * means less is tracked. Undefined when there is no cost baseline, since a cost cannot then be told apart from earlier spend.
  */
 async function record($: EngineInterface, entry: Decision): Promise<Tracked | undefined> {
   const id = crypto.randomUUID()
   const base = (await $.session.usage().catch(() => undefined))?.cost?.usd
+  // After /clear the count can still include the cleared conversation's prompts, so turns are counted from this reading.
+  const turns0 = await $.session.turns().catch(() => undefined)
   await log($, { ...entry, id }).catch(() => undefined)
-  // `last` starts at 0, so a turn that spent nothing since the decision writes no cost and the session stays out of the averages.
-  return base === undefined ? undefined : { id, base, last: 0 }
+  // `sent` starts at zero cost and turns, so a turn that spent nothing writes neither and the session stays out of those averages.
+  return base === undefined ? undefined : { id, base, turns0, sent: { cost: 0, turns: 0 } }
 }
 
 /**
- * Sets the cost on the entry with this id. Never appends: an entry the cap pushed out stays out. Rejects when the store does, and,
+ * Sets these figures on the entry with this id. Never appends: an entry the cap pushed out stays out. Rejects when the store does, and,
  * like `log()`, a failed read rejects rather than writing back a list that lost other sessions' entries.
  */
-async function addCost($: EngineInterface, id: string, cost: number): Promise<void> {
+async function amend($: EngineInterface, id: string, fields: Spend): Promise<void> {
   const stored = await $.store.get(LOG)
   const list = Array.isArray(stored) ? (stored as Decision[]) : []
   if (!list.some(d => d.id === id)) return
-  await $.store.set(LOG, list.map(d => (d.id === id ? { ...d, cost } : d)))
+  await $.store.set(LOG, list.map(d => (d.id === id ? { ...d, ...fields } : d)))
 }
 
 /** A decision's tier direction: 1 up, -1 down, 0 none; undefined for a change between names the mod cannot rank. */
@@ -359,18 +367,33 @@ function tally(list: Decision[]): string {
     return `| ${rating} | ${of.length} | ${switched.length} | ${switched.filter(d => direction(d) === 1).length} | ${switched.filter(d => direction(d) === -1).length} |`
   })
   const counts = `${list.length} decision${list.length === 1 ? '' : 's'} logged (the newest ${LOG_CAP} are kept).\n\n| Rating | Rated | Switched model | Up (pricier) | Down (cheaper) |\n| --- | --- | --- | --- | --- |\n${rows.join('\n')}`
+  const tables: string[] = []
   const costed = list.filter(d => typeof d.cost === 'number')
-  if (!costed.length) return counts
-  const costs = (Object.keys(SUGGEST) as Rating[]).flatMap(rating =>
-    KINDS.flatMap(k => {
-      const of = costed.filter(d => d.rating === rating && kind(d) === k)
-      return of.length ? [`| ${rating} | ${k} | ${of.length} | ${usd(of.reduce((sum, d) => sum + d.cost!, 0) / of.length)} |`] : []
-    }),
-  )
-  return (
-    `${counts}\n\nAverage cost of a session after its decision, in US dollars:\n\n| Rating | Choice | Sessions | Average cost |\n| --- | --- | --- | --- |\n` +
-    `${costs.join('\n')}\n\nSessions differ in task, so this shows association, not cause.`
-  )
+  if (costed.length) {
+    const costs = (Object.keys(SUGGEST) as Rating[]).flatMap(rating =>
+      KINDS.flatMap(k => {
+        const of = costed.filter(d => d.rating === rating && kind(d) === k)
+        return of.length ? [`| ${rating} | ${k} | ${of.length} | ${usd(of.reduce((sum, d) => sum + d.cost!, 0) / of.length)} |`] : []
+      }),
+    )
+    tables.push(`Average cost of a session after its decision, in US dollars:\n\n| Rating | Choice | Sessions | Average cost |\n| --- | --- | --- | --- |\n${costs.join('\n')}`)
+  }
+  // Each average counts only the entries that have its figure, and the count beside it says how many that was.
+  const mean = (of: Decision[], key: 'turns' | 'ctx') => of.map(d => d[key]).filter((n): n is number => typeof n === 'number')
+  const usage = (Object.keys(SUGGEST) as Rating[]).flatMap(rating => {
+    const of = list.filter(d => d.rating === rating)
+    const [turns, ctx] = [mean(of, 'turns'), mean(of, 'ctx')]
+    const avg = (ns: number[], show: (n: number) => string) => (ns.length ? show(ns.reduce((a, b) => a + b, 0) / ns.length) : '-')
+    return turns.length || ctx.length
+      ? [`| ${rating} | ${avg(turns, n => n.toFixed(1))} | ${turns.length} | ${avg(ctx, n => `${n.toFixed(0)}%`)} | ${ctx.length} |`]
+      : []
+  })
+  if (usage.length) {
+    tables.push(
+      `Average turns, and average share of the context window used, at the end of a session's latest turn:\n\n| Rating | Average turns | Sessions | Average context used | Sessions |\n| --- | --- | --- | --- | --- |\n${usage.join('\n')}`,
+    )
+  }
+  return tables.length ? `${counts}\n\n${tables.join('\n\n')}\n\nSessions differ in task, so this shows association, not cause.` : counts
 }
 
 /**
@@ -638,7 +661,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'refine-prompt', description: 'Review a prompt and put an improved one in the prompt box', argumentHint: '<prompt>' })
-    await $.command.register({ name: 'triage-stats', description: 'Show how often each rating led to a model switch, and what those sessions cost' })
+    await $.command.register({ name: 'triage-stats', description: 'Show how often each rating led to a model switch, and what those sessions cost, how many turns they ran and how full their context got' })
     return next(e)
   })
 
@@ -698,18 +721,29 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e)) // a failure here never holds up the prompt
 
-  // Records, on the decision this session logged, what the session has cost since. Each turn writes the latest figure, so a write
-  // lost to another session's (see log()) is repaired by the next turn. A failure never touches the turn's answer.
-  // ponytail: one store write per turn whose cost changed; session.measure (pushed, folds bursts) is the move if that ever matters
+  // Records, on the decision this session logged, what the session has cost since, the turns completed since, and the context percent.
+  // Each turn writes the latest figures, so a write lost to another session's (see log()) is repaired by the next turn. A failure
+  // never touches the turn's answer.
+  // ponytail: one store write per turn whose figures changed; session.measure (pushed, folds bursts) is the move if that ever matters
   on('turn.complete', async ($, e, next) => {
     const t = tracked
     if (e.agentId || !t) return next(e)
-    const now = (await $.session.usage()).cost?.usd
-    // Down to four places, so the figure never exceeds /cost; the 1e-6 keeps 0.19999999999999998 from storing as 0.1999.
-    const cost = now === undefined ? undefined : Math.floor((now - t.base) * 1e4 + 1e-6) / 1e4
-    if (cost !== undefined && cost !== t.last) {
-      await addCost($, t.id, cost)
-      t.last = cost
+    const usage = await $.session.usage()
+    const now = usage.cost?.usd
+    // A turn count that cannot be read, or that fell below the decision's (a figure that would pull the average down), is left out.
+    const count = t.turns0 === undefined ? undefined : await $.session.turns().then(n => n - t.turns0!, () => undefined)
+    const read: Spend = {
+      // Down to four places, so the figure never exceeds /cost; the 1e-6 keeps 0.19999999999999998 from storing as 0.1999.
+      cost: now === undefined ? undefined : Math.floor((now - t.base) * 1e4 + 1e-6) / 1e4,
+      turns: count !== undefined && count >= 0 ? count : undefined,
+      // Absent until the first response of the live window.
+      ctx: usage.context.percent,
+    }
+    // Only a figure that is present and differs from the one last written; the others stay as they were on the entry.
+    const changed = Object.fromEntries(Object.entries(read).filter(([k, v]) => v !== undefined && v !== t.sent[k as keyof Spend])) as Spend
+    if (Object.keys(changed).length) {
+      await amend($, t.id, changed)
+      Object.assign(t.sent, changed)
     }
     return next(e)
   }).catch(($, e, next) => next(e))

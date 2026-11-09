@@ -32,6 +32,10 @@ type Setup = {
   usd?: number | number[]
   /** Every `$.session.usage()` call rejects. */
   usageFails?: boolean
+  /** The context percent, or one reading per `$.session.usage()` call in order; undefined leaves `context.percent` out, as on a fresh session. */
+  pct?: number | number[]
+  /** Every `$.session.turns()` call rejects; set it after the first prompt, which reads the turn count too. */
+  turnsFails?: boolean
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -69,7 +73,10 @@ function engine(on: On, s: Setup) {
   let classified = 0
   let writes = 0
 
-  on('session.turns', () => ({ value: s.turns ?? 0 }))
+  on('session.turns', () => {
+    if (s.turnsFails) throw new Error('turns unavailable')
+    return { value: s.turns ?? 0 }
+  })
   on('session.model', () => ({ value: s.model ?? 'claude-sonnet-5-5' }))
   on('session.surfaces', () => ({ value: s.surfaces ?? ['terminal'] }))
   on('prompt.read', () => ({ value: { text: s.draft ?? '', cursor: (s.draft ?? '').length } }))
@@ -77,7 +84,15 @@ function engine(on: On, s: Setup) {
   on('session.usage', () => {
     if (s.usageFails) throw new Error('usage unavailable')
     const usd = Array.isArray(s.usd) ? s.usd.shift() : s.usd
-    return { value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [], ...(usd === undefined ? {} : { cost: { usd } }) } }
+    const percent = Array.isArray(s.pct) ? s.pct.shift() : s.pct
+    return {
+      value: {
+        startedAt: 0,
+        context: { window: 200_000, ...(percent === undefined ? {} : { percent }) },
+        rateLimits: [],
+        ...(usd === undefined ? {} : { cost: { usd } }),
+      },
+    }
   })
   // The engine's own end of a turn beneath the plugin: the answer passes through as the text shown.
   on('turn.complete', (_$, e) => ({ text: e.answer }))
@@ -1138,7 +1153,7 @@ for (const surface of SURFACES) {
 // --- The decision log and /triage-stats ---
 
 /** One logged decision, as the store holds it. */
-type Decision = { rating: string; from: string; to: string; chose: string; id?: string; cost?: number }
+type Decision = { rating: string; from: string; to: string; chose: string; id?: string; cost?: number; turns?: number; ctx?: number }
 
 test('a rated first prompt appends one decision naming the rating, the models before and after and the choice', async ($, on) => {
   const seen = engine(on, { answer: 'Switch to opus' })
@@ -1522,6 +1537,163 @@ test('/triage-stats shows no cost table when no entry has a cost', async ($, on)
   const { text } = await command($, 'triage-stats')
   expect(text).not.toMatch(/cost/i)
   expect(text).not.toContain('$')
+})
+
+// --- How long each rated session ran and how full its context got, on the same entry as its cost ---
+
+test('a main-loop turn records the turns since the decision and the context percent on that entry', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 1], pct: [3, 42] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer across three services')
+  s.turns = 2
+  await complete($)
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry?.turns).toBe(2)
+  expect(entry?.ctx).toBe(42)
+  // Cost still lands in the same update.
+  expect(entry?.cost).toBe(1)
+})
+
+test('a later turn replaces turns and ctx on the same entry, and unchanged figures write nothing', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 1, 2, 2], pct: [3, 20, 35, 35] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  s.turns = 1
+  await complete($)
+  s.turns = 3
+  await complete($)
+  const list = seen.store.decisions as Decision[]
+  expect(list.length).toBe(1)
+  expect([list[0]?.turns, list[0]?.ctx]).toEqual([3, 35])
+  const writes = seen.writes()
+  await complete($)
+  expect(seen.writes()).toBe(writes)
+})
+
+test("a subagent's turn records neither turns nor ctx", async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 1], pct: [3, 42] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  s.turns = 3
+  await complete($, 'sub-1')
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry && 'turns' in entry).toBe(false)
+  expect(entry && 'ctx' in entry).toBe(false)
+})
+
+test('turns counts from the decision, so a /clear whose turn count still holds the old conversation does not inflate it', async ($, on) => {
+  const s: Setup = { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2], pct: [1, 10, 2, 8] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  s.turns = 1
+  await complete($)
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  // The count still includes the cleared conversation's three prompts when the next first prompt arrives.
+  s.turns = 3
+  await submit($, 'Redesign the billing layer')
+  s.turns = 5
+  await complete($)
+  expect((seen.store.decisions as Decision[]).map(d => [d.turns, d.ctx])).toEqual([[1, 10], [2, 8]])
+})
+
+test('a turn count that fell below the decision time records no turns, and the cost still lands', async ($, on) => {
+  const s: Setup = { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2], pct: [1, 10, 2, 8] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 5
+  await submit($, 'Redesign the billing layer')
+  // The count reads lower than at the decision: a negative figure would poison the average.
+  s.turns = 2
+  await complete($)
+  const second = (seen.store.decisions as Decision[])[1]
+  expect(second && 'turns' in second).toBe(false)
+  expect(second?.cost).toBe(0.5)
+  // Readings: 1 at the first decision, 10 at the second, 2 when the second's turn ends.
+  expect(second?.ctx).toBe(2)
+})
+
+test('a fresh session with no context percent yet records no ctx, and the cost still lands', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 0.5] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  s.turns = 1
+  await complete($)
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry && 'ctx' in entry).toBe(false)
+  expect(entry?.cost).toBe(0.5)
+  expect(entry?.turns).toBe(1)
+})
+
+test('a turn count that cannot be read leaves turns out, records the rest, and the answer passes through', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 1], pct: [3, 42] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  s.turnsFails = true
+  expect((await complete($, undefined, 'All done.')).text).toBe('All done.')
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry && 'turns' in entry).toBe(false)
+  expect([entry?.cost, entry?.ctx]).toEqual([1, 42])
+})
+
+test('the store still holds neither the prompt text nor the session id once turns and ctx are recorded', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 2], pct: [3, 42] }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the Zanzibar auth layer')
+  s.turns = 2
+  await complete($)
+  const all = JSON.stringify(seen.store)
+  expect(all).not.toContain('Zanzibar')
+  expect(all).not.toContain(SESSION_ID)
+})
+
+test('/triage-stats averages turns and context percent per rating, with the session count beside each', async ($, on) => {
+  const decisions: Decision[] = [
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', turns: 3, ctx: 40 },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'b', turns: 4, ctx: 50 },
+    // Turns without a ctx, and an entry with neither: each is left out of the average it has no figure for.
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'dismissed', id: 'c', turns: 5 },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'dismissed', id: 'd' },
+    // A rating with only a context figure.
+    { rating: 'simple', from: 'claude-sonnet-5-5', to: 'haiku', chose: 'Switch to haiku', id: 'e', ctx: 10 },
+  ]
+  engine(on, { turns: 3, store: { decisions } })
+
+  const { text } = await command($, 'triage-stats')
+  // Average turns, sessions behind it, average context, sessions behind it.
+  expect(text).toContain('| complex | 4.0 | 3 | 45% | 2 |')
+  expect(text).toContain('| simple | - | 0 | 10% | 1 |')
+  // No row for a rating with no figure.
+  expect(text).not.toContain('| moderate | -')
+  // The rating table is unchanged.
+  expect(text).toContain('| complex | 4 | 2 | 2 | 0 |')
+  // Nothing was costed, so no cost table.
+  expect(text).not.toContain('$')
+})
+
+test('/triage-stats shows the turns table beside the cost table when entries have both', async ($, on) => {
+  const decisions: Decision[] = [{ rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', cost: 1, turns: 2, ctx: 30 }]
+  engine(on, { turns: 3, store: { decisions } })
+
+  const { text } = await command($, 'triage-stats')
+  expect(text).toContain('| complex | switched | 1 | $1.00 |')
+  expect(text).toContain('| complex | 2.0 | 1 | 30% | 1 |')
+})
+
+test('/triage-stats shows no turns table when no entry has turns or ctx', async ($, on) => {
+  const decisions: Decision[] = [{ rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', cost: 1 }]
+  engine(on, { turns: 3, store: { decisions } })
+
+  const { text } = await command($, 'triage-stats')
+  expect(text).not.toMatch(/turns|context/i)
 })
 
 test('a simple prompt two tiers above haiku lists the switch before the low-effort option', async ($, on) => {
