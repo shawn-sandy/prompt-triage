@@ -10,7 +10,8 @@
       "gh pr *",
       "gh run *",
       "gh issue *",
-      "gh api *"
+      "gh api *",
+      "gh release *"
     ]
   },
   "permissions": {
