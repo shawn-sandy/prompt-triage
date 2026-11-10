@@ -11,7 +11,7 @@
       "gh run *",
       "gh issue *",
       "gh api *",
-      "gh release *"
+      "gh release list *"
     ]
   },
   "permissions": {
