@@ -2302,3 +2302,18 @@ test('the plan\'s Final check: refine with a check, switch to opus, Explore on h
   expect(text).toContain(`1 decision logged since ${today}`)
   expect(text).toContain('| complex | medium | 1 | $2.00 |')
 })
+
+test('a later request with no named effort level clears the effort an earlier turn recorded', async ($, on) => {
+  const seen = engine(on, { rating: 'simple', answer: 'Keep claude-sonnet-5-5', usd: [0, 1, 2] })
+
+  await submit($, 'What does git rebase --onto do?')
+  await step($, undefined, 'medium')
+  await complete($)
+  expect((seen.store.decisions as Decision[])[0]?.effort).toBe('medium')
+  // A numeric budget (or a model with no effort) is no named level: the entry must not keep the old one beside the new cost.
+  await step($, undefined, 2048)
+  await complete($)
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry && 'effort' in entry).toBe(false)
+  expect(entry?.cost).toBe(2)
+})

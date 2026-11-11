@@ -184,7 +184,7 @@ rating with neither figure gets no row.
 The same update sets one more: `effort`, the effort level the latest main-loop
 request ran at, after any change the mod made (so `medium` after a raise, and
 `low` after **Keep model, effort low**). A subagent's requests do not set it,
-and a request with no named level, such as a numeric budget, leaves it out.
+and a request with no named level, such as a numeric budget, leaves it out, or removes the level an earlier turn recorded.
 When at least one entry has both an `effort` and a `cost`, `/triage-stats` adds
 a table of rating, effort, sessions and average cost, which is how to see what
 each effort level cost. Neither the log nor the command makes a model request.

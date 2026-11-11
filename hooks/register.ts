@@ -375,14 +375,21 @@ async function record($: EngineInterface, entry: Decision): Promise<Tracked | un
 }
 
 /**
- * Sets these figures on the entry with this id. Never appends: an entry the cap pushed out stays out. Rejects when the store does, and,
- * like `log()`, a failed read rejects rather than writing back a list that lost other sessions' entries.
+ * Sets these figures on the entry with this id; a figure given as `undefined` is removed from it. Never appends: an entry the cap pushed
+ * out stays out. Rejects when the store does, and, like `log()`, a failed read rejects rather than writing back a list that lost other
+ * sessions' entries.
  */
 async function amend($: EngineInterface, id: string, fields: Spend): Promise<void> {
   const stored = await $.store.get(LOG)
   const list = Array.isArray(stored) ? (stored as Decision[]) : []
   if (!list.some(d => d.id === id)) return
-  await $.store.set(LOG, list.map(d => (d.id === id ? { ...d, ...fields } : d)))
+  const apply = (d: Decision): Decision => {
+    const next: Decision = { ...d, ...fields }
+    // Removed explicitly, so the entry is right whatever the store does with an undefined value.
+    for (const key of Object.keys(fields) as (keyof Spend)[]) if (fields[key] === undefined) delete next[key]
+    return next
+  }
+  await $.store.set(LOG, list.map(d => (d.id === id ? apply(d) : d)))
 }
 
 /** A decision's tier direction: 1 up, -1 down, 0 none; undefined for a change between names the mod cannot rank. */
@@ -871,8 +878,11 @@ export const register: Register = (on, options) => {
       ctx: usage?.context.percent,
       effort: ran,
     }
-    // Only a figure that is present and differs from the one last written; the others stay as they were on the entry.
-    const changed = Object.fromEntries(Object.entries(read).filter(([k, v]) => v !== undefined && v !== t.sent[k as keyof Spend])) as Spend
+    // Only a figure that is present and differs from the one last written; the others stay as they were on the entry. The exception is
+    // effort: a latest request with no named level clears the one an earlier turn recorded, or the entry would pair it with newer cost.
+    const changed = Object.fromEntries(
+      Object.entries(read).filter(([k, v]) => (v !== undefined || k === 'effort') && v !== t.sent[k as keyof Spend]),
+    ) as Spend
     if (Object.keys(changed).length) {
       await amend($, t.id, changed)
       Object.assign(t.sent, changed)
