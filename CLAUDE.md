@@ -90,7 +90,7 @@ node scripts/eval-rating.mjs   # scores the rating rubric; --baseline scores bar
 node scripts/eval-rating.mjs --runs 3   # the mean of 3 runs; one run varies by a few cases
 ```
 
-The eval makes 160 `claude -p --model haiku` calls per run. One run of the unchanged rubric has
+The eval makes 168 `claude -p --model haiku` calls per run. One run of the unchanged rubric has
 scored `complex` anywhere from 32/40 to 36/40, so compare rubric changes on the mean of several
 runs. It needs Node 24, a signed-in `claude` and
 network access to api.anthropic.com; in a sandbox, a timeout means that host is blocked. It

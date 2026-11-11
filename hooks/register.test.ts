@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { ModelCompleteInput, On, PromptSubmitInput, RenderElement, RenderSurface, TurnStepInput } from 'claude-code'
+import type { AgentSpawnInput, ModelCompleteInput, On, PromptSubmitInput, RenderElement, RenderSurface, TurnStepInput } from 'claude-code'
 
 type Setup = {
   turns?: number
@@ -76,6 +76,8 @@ function engine(on: On, s: Setup) {
   const reviewed: string[] = []
   const reviews: ModelCompleteInput[] = []
   const ratings: ModelCompleteInput[] = []
+  /** Every agent.spawn input that reached the engine, after the mod's hook. */
+  const spawned: AgentSpawnInput[] = []
   let classified = 0
   let writes = 0
 
@@ -173,6 +175,11 @@ function engine(on: On, s: Setup) {
     ran.push(e.command)
     return { text: '' }
   })
+  // The engine's own spawn beneath the plugin: the subagent runs on the model the hook set, else the parent's.
+  on('agent.spawn', (_$, e) => {
+    spawned.push(e)
+    return { model: e.model ?? e.parentModel ?? 'claude-sonnet-5-5', agentId: `agent-${spawned.length}` }
+  })
   on('model.complete', (_$, e) => {
     completes++
     // The rater and the reviewer share this call; each one's system prompt tells them apart.
@@ -202,7 +209,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { writes: () => writes, redraws: () => redraws, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
+  return { writes: () => writes, redraws: () => redraws, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, spawned, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -286,7 +293,7 @@ test('a complex prompt on a model above opus is not offered a step down', async 
   expect(seen.asked).toEqual([])
   await step($, undefined, 'low')
   expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
-  expect(seen.steps[0]?.effort).toBe('high')
+  expect(seen.steps[0]?.effort).toBe('medium')
 })
 
 test('a later prompt in the session is not checked', async ($, on) => {
@@ -511,7 +518,7 @@ test('/refine-prompt asks at most three questions', async ($, on) => {
   expect(seen.filled).toEqual(['Review hooks/register.ts.'])
 })
 
-test('a complex prompt raises main-loop effort below high, and leaves the rest alone', async ($, on) => {
+test('a complex prompt raises main-loop effort below medium, and leaves the rest alone', async ($, on) => {
   const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
@@ -520,8 +527,8 @@ test('a complex prompt raises main-loop effort below high, and leaves the rest a
   await step($, 'sub-1', 'low')
   await step($)
   await step($, undefined, 2048)
-  expect(seen.steps.map(s => s.effort)).toEqual(['high', 'xhigh', 'low', undefined, 2048])
-  expect(seen.status.at(-1)).toBe('effort raised to high')
+  expect(seen.steps.map(s => s.effort)).toEqual(['medium', 'xhigh', 'low', undefined, 2048])
+  expect(seen.status.at(-1)).toBe('effort raised to medium')
 })
 
 test('a moderate prompt raises effort to medium even when nothing is asked', async ($, on) => {
@@ -556,7 +563,7 @@ test("the person's own /effort ends the effort minimum but keeps the model overr
   await step($, undefined, 'low')
   await command($, 'effort', 'low')
   await step($, undefined, 'low')
-  expect(seen.steps.map(s => [s.model, s.effort])).toEqual([['opus', 'high'], ['opus', 'low']])
+  expect(seen.steps.map(s => [s.model, s.effort])).toEqual([['opus', 'medium'], ['opus', 'low']])
   expect(seen.status.at(-1)).toBe('running opus, not claude-sonnet-5-5')
 })
 
@@ -566,11 +573,12 @@ test('a prompt rated again replaces the effort minimum and its status', async ($
 
   await submit($, 'Redesign the auth layer')
   await step($, undefined, 'low')
-  s.rating = 'moderate'
-  await submit($, 'Rename this function')
+  // Complex and moderate share a minimum now, so a simple rating, which sets none, shows the first one was replaced.
+  s.rating = 'simple'
+  await submit($, 'Fix a typo')
   await step($, undefined, 'low')
-  expect(seen.steps.map(x => x.effort)).toEqual(['high', 'medium'])
-  expect(seen.status.at(-1)).toBe('effort raised to medium')
+  expect(seen.steps.map(x => x.effort)).toEqual(['medium', 'low'])
+  expect(seen.status.at(-1)).toBeUndefined()
 })
 
 test("/model after a raise keeps the effort part of the status line", async ($, on) => {
@@ -578,9 +586,9 @@ test("/model after a raise keeps the effort part of the status line", async ($, 
 
   await submit($, 'Redesign the auth layer')
   await step($, undefined, 'low')
-  expect(seen.status.at(-1)).toBe('running opus, not claude-sonnet-5-5, effort raised to high')
+  expect(seen.status.at(-1)).toBe('running opus, not claude-sonnet-5-5, effort raised to medium')
   await command($, 'model', 'sonnet')
-  expect(seen.status.at(-1)).toBe('effort raised to high')
+  expect(seen.status.at(-1)).toBe('effort raised to medium')
 })
 
 test('a complex prompt makes exactly one model.complete call before the dialog, rating and restating together', async ($, on) => {
@@ -733,13 +741,13 @@ for (const model of ['claude-fable-5-1', 'claude-mythos-5-1']) {
   })
 }
 
-test('a long-running prompt raises main-loop effort to high', async ($, on) => {
+test('a long-running prompt raises main-loop effort to medium', async ($, on) => {
   const seen = engine(on, { rating: 'long-running', model: 'claude-opus-5-5', answer: 'Keep claude-opus-5-5' })
 
   await submit($, 'Migrate the whole codebase from Express to Fastify')
-  await step($, undefined, 'medium')
-  expect(seen.steps[0]?.effort).toBe('high')
-  expect(seen.status.at(-1)).toBe('effort raised to high')
+  await step($, undefined, 'low')
+  expect(seen.steps[0]?.effort).toBe('medium')
+  expect(seen.status.at(-1)).toBe('effort raised to medium')
 })
 
 test('a simple prompt offers to keep the model at low effort first', async ($, on) => {
@@ -1103,7 +1111,8 @@ test('Refine pressed twice while a review runs reviews once', async ($, on) => {
 })
 
 test('the model dialog and /refine-prompt refine with the stored picks', async ($, on) => {
-  const seen = engine(on, { answer: 'Refine prompt', review: Array(3).fill(REVIEWED), draft: LONG, store: { picks: { scope: 'minimal' } } })
+  // Moderate, since a strong rating swaps an Auto Goal for Add a check in the dialog alone.
+  const seen = engine(on, { rating: 'moderate', model: 'claude-opus-5-5', answer: 'Refine prompt', review: Array(3).fill(REVIEWED), draft: LONG, store: { picks: { scope: 'minimal' } } })
 
   await submit($, 'Redesign the auth layer')
   await command($, 'refine-prompt', 'Redesign the auth layer')
@@ -1202,7 +1211,7 @@ for (const surface of SURFACES) {
 // --- The decision log and /triage-stats ---
 
 /** One logged decision, as the store holds it. */
-type Decision = { rating: string; from: string; to: string; chose: string; id?: string; cost?: number; turns?: number; ctx?: number }
+type Decision = { rating: string; from: string; to: string; chose: string; id?: string; cost?: number; turns?: number; ctx?: number; effort?: string; at?: string }
 
 test('a rated first prompt appends one decision naming the rating, the models before and after and the choice', async ($, on) => {
   const seen = engine(on, { answer: 'Switch to opus' })
@@ -1783,11 +1792,12 @@ test('a moderate prompt on opus says what the rating suggests and names the mode
   expect(seen.asked[0]).toEqual(['Switch to sonnet', 'Keep claude-opus-5-5', 'Refine prompt'])
 })
 
-test('a complex prompt states the high effort floor in one sentence, with no "if it runs here"', async ($, on) => {
+test('a complex prompt states no effort minimum in the dialog', async ($, on) => {
   const seen = engine(on, { rating: 'complex', model: 'claude-sonnet-5-5', restate: 'redesign auth', answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
-  expect(seen.questions[0]).toBe('Read as: redesign auth. Rated complex: an opus-sized task. You are on claude-sonnet-5-5. Effort will be at least high. Run it how?')
+  expect(seen.questions[0]).toBe('Read as: redesign auth. Rated complex: an opus-sized task. You are on claude-sonnet-5-5. Run it how?')
+  expect(seen.questions[0]).not.toContain('Effort will be at least')
 })
 
 test('a simple prompt names both cheaper levers and no effort floor', async ($, on) => {
@@ -2023,3 +2033,244 @@ for (const [answer, ran] of [['Compact', ['compact']], [undefined, []], ['compac
     expect(seen.ran).toEqual(ran)
   })
 }
+
+// --- Self-verification first: Refine prompt on a strong rating adds a check unless the person set the Goal ---
+
+const CHECK_LINE = 'a check the agent can run'
+
+test('Refine prompt on a complex prompt with Goal Auto asks the reviewer to end with a check', async ($, on) => {
+  const seen = engine(on, { answer: 'Refine prompt', review: REVIEWED })
+
+  await submit($, 'Redesign the auth layer across three services')
+  expect(seen.reviews[0]?.system).toContain(CHECK_LINE)
+})
+
+test('Refine prompt on a long-running prompt with Goal Auto asks the reviewer to end with a check', async ($, on) => {
+  const seen = engine(on, { rating: 'long-running', model: 'claude-opus-5-5', answer: 'Refine prompt', review: REVIEWED })
+
+  await submit($, 'Migrate the whole codebase from Express to Fastify')
+  expect(seen.reviews[0]?.system).toContain(CHECK_LINE)
+})
+
+test('Refine prompt on a complex prompt respects a stored Goal of Off', async ($, on) => {
+  const seen = engine(on, { answer: 'Refine prompt', review: REVIEWED, store: { picks: { goal: 'off' } } })
+
+  await submit($, 'Redesign the auth layer across three services')
+  expect(seen.reviews[0]?.system).not.toContain(CHECK_LINE)
+  expect(seen.reviews[0]?.system).toContain('Skip the goal')
+})
+
+test('Refine prompt on a moderate prompt with Goal Auto adds no check', async ($, on) => {
+  const seen = engine(on, { rating: 'moderate', model: 'claude-opus-5-5', answer: 'Refine prompt', review: REVIEWED })
+
+  await submit($, 'Add a retry limit to the upload client')
+  expect(seen.reviews[0]?.system).not.toContain(CHECK_LINE)
+})
+
+// --- The hand-off brief carries a short written plan ---
+
+const asksForPlan = (e?: PromptSubmitInput) => e?.context?.some(c => c.includes('start_session') && /short written plan/.test(c)) ?? false
+
+test('Open in a new session asks Claude to put a short written plan in the brief', async ($, on) => {
+  const seen = engine(on, { surfaces: ['desktop'], answer: 'Open in a new session' })
+
+  await submit($, 'Redesign the auth layer')
+  expect(asksForPlan(seen.submitted[0])).toBe(true)
+})
+
+test('Run in: New session asks Claude to put a short written plan in the brief', async ($, on) => {
+  const seen = engine(on, { surfaces: ['desktop'] })
+
+  await armHandOff($)
+  await submit($, 'Redesign the auth layer')
+  expect(asksForPlan(seen.submitted[0])).toBe(true)
+})
+
+// --- The effort a session ran at, and the date, on the decision entry ---
+
+test('a main-loop turn records the effort the request ran at on the decision entry', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5', usd: [0, 1] })
+
+  await submit($, 'Redesign the auth layer')
+  await step($, undefined, 'low')
+  await complete($)
+  expect((seen.store.decisions as Decision[])[0]?.effort).toBe('medium')
+})
+
+test('Keep model, effort low records low', async ($, on) => {
+  const seen = engine(on, { rating: 'simple', answer: 'Keep model, effort low', usd: [0, 1] })
+
+  await submit($, 'What does git rebase --onto do?')
+  await step($, undefined, 'high')
+  await complete($)
+  expect((seen.store.decisions as Decision[])[0]?.effort).toBe('low')
+})
+
+test('a subagent step does not change the recorded effort', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5', usd: [0, 1] })
+
+  await submit($, 'Redesign the auth layer')
+  await step($, undefined, 'xhigh')
+  await step($, 'sub-1', 'low')
+  await complete($)
+  expect((seen.store.decisions as Decision[])[0]?.effort).toBe('xhigh')
+})
+
+test('a request with no named effort level records no effort', async ($, on) => {
+  const seen = engine(on, { rating: 'simple', answer: 'Keep claude-sonnet-5-5', usd: [0, 1] })
+
+  await submit($, 'What does git rebase --onto do?')
+  await step($, undefined, 2048)
+  await complete($)
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry && 'effort' in entry).toBe(false)
+})
+
+test('/triage-stats prints average cost by rating and effort, counting only entries with both', async ($, on) => {
+  const base = { from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Keep claude-sonnet-5-5' }
+  const decisions: Decision[] = [
+    { rating: 'complex', ...base, id: 'a', cost: 1, effort: 'medium' },
+    { rating: 'complex', ...base, id: 'b', cost: 3, effort: 'medium' },
+    { rating: 'complex', ...base, id: 'c', cost: 5, effort: 'high' },
+    // No effort, or no cost: left out of the effort table.
+    { rating: 'complex', ...base, id: 'd', cost: 9 },
+    { rating: 'complex', ...base, id: 'e', effort: 'low' },
+  ]
+  engine(on, { turns: 3, store: { decisions } })
+
+  const { text } = await command($, 'triage-stats')
+  expect(text).toContain('| Rating | Effort | Sessions | Average cost |')
+  expect(text).toContain('| complex | medium | 2 | $2.00 |')
+  expect(text).toContain('| complex | high | 1 | $5.00 |')
+  expect(text).not.toContain('| complex | low |')
+})
+
+test('/triage-stats shows no effort table when no entry has both an effort and a cost', async ($, on) => {
+  const base = { from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Keep claude-sonnet-5-5' }
+  const decisions: Decision[] = [{ rating: 'complex', ...base, cost: 1 }, { rating: 'complex', ...base, effort: 'medium' }]
+  engine(on, { turns: 3, store: { decisions } })
+
+  const { text } = await command($, 'triage-stats')
+  expect(text).not.toContain('| Effort |')
+})
+
+test('a new decision entry carries today\'s UTC date as `at`', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
+
+  await submit($, 'Redesign the auth layer')
+  expect((seen.store.decisions as Decision[])[0]?.at).toBe(new Date().toISOString().slice(0, 10))
+})
+
+const DATED = (() => {
+  const base = { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus' }
+  return [
+    { ...base, id: 'old', at: '2026-11-11', cost: 100 },
+    { ...base, id: 'same', at: '2026-11-12', cost: 1 },
+    { ...base, id: 'later', at: '2026-11-13', cost: 3 },
+    // Logged before dates existed: left out of any since tally.
+    { ...base, id: 'undated', cost: 200 },
+  ] as Decision[]
+})()
+
+test('/triage-stats since a date counts only entries on or after it, and names the date', async ($, on) => {
+  engine(on, { turns: 3, store: { decisions: DATED } })
+
+  const { text } = await command($, 'triage-stats', 'since 2026-11-12')
+  expect(text).toContain('2 decisions logged')
+  expect(text).toContain('since 2026-11-12')
+  expect(text).toContain('| complex | switched | 2 | $2.00 |')
+})
+
+test('/triage-stats with no argument still counts every entry', async ($, on) => {
+  engine(on, { turns: 3, store: { decisions: DATED } })
+
+  const { text } = await command($, 'triage-stats')
+  expect(text).toContain('4 decisions logged')
+})
+
+for (const args of ['since 9/22/2026', 'since 2026-13-01', 'since 2026-02-30', 'since yesterday', 'since', 'since 2026-11-12 extra', 'whatever']) {
+  test(`/triage-stats "${args}" prints a usage line and no table`, async ($, on) => {
+    engine(on, { turns: 3, store: { decisions: DATED } })
+
+    const { text } = await command($, 'triage-stats', args)
+    expect(text).toContain('Usage: /triage-stats [since YYYY-MM-DD]')
+    expect(text).not.toContain('| Rating |')
+  })
+}
+
+// --- Exploration runs on haiku once the main loop has moved up ---
+
+/** Spawns a subagent as the Agent tool would, with extra input fields the testing call type leaves out. */
+async function spawn($: Engine, extra: Record<string, unknown> = {}) {
+  return await ($.agent.spawn as (input: Record<string, unknown>) => Promise<unknown>)({ prompt: 'Map the auth code', subagentType: 'Explore', ...extra })
+}
+
+test('after Switch to opus an Explore spawn with no model of its own runs on haiku', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await spawn($)
+  expect(seen.spawned[0]?.model).toBe('haiku')
+})
+
+test('after Switch to fable an Explore spawn runs on haiku', async ($, on) => {
+  const seen = engine(on, { rating: 'long-running', answer: 'Switch to fable' })
+
+  await submit($, 'Migrate the whole codebase from Express to Fastify')
+  await spawn($)
+  expect(seen.spawned[0]?.model).toBe('haiku')
+})
+
+test('an Explore spawn after Keep, or with no decision at all, is left alone', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
+
+  await spawn($)
+  await submit($, 'Redesign the auth layer')
+  await spawn($)
+  expect(seen.spawned.map(e => e.model)).toEqual([undefined, undefined])
+})
+
+test('after Switch to sonnet an Explore spawn is left alone: only a switch up to opus or above routes it', async ($, on) => {
+  const seen = engine(on, { rating: 'moderate', model: 'claude-haiku-5-5', answer: 'Switch to sonnet' })
+
+  await submit($, 'Add a retry limit to the upload client')
+  await spawn($)
+  expect(seen.spawned[0]?.model).toBeUndefined()
+})
+
+test('after Switch to opus a spawn of another agent type is left alone', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await spawn($, { subagentType: 'general-purpose' })
+  expect(seen.spawned[0]?.model).toBeUndefined()
+})
+
+test('after Switch to opus a spawn that sets its own model keeps it', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await spawn($, { model: 'sonnet' })
+  expect(seen.spawned[0]?.model).toBe('sonnet')
+})
+
+test('after Switch to opus a resumed Explore run and a teammate are left alone', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await spawn($, { resume: { agentId: 'agent-9' } })
+  await spawn($, { isTeammate: true })
+  // The engine saw the extra fields, so these cases test the hook and not a call that dropped them.
+  expect(seen.spawned[0]?.resume?.agentId).toBe('agent-9')
+  expect(seen.spawned[1]?.isTeammate).toBe(true)
+  expect(seen.spawned.map(e => e.model)).toEqual([undefined, undefined])
+})
+
+test('a /model of the persons own ends the Explore routing', async ($, on) => {
+  const seen = engine(on, { answer: 'Switch to opus' })
+
+  await submit($, 'Redesign the auth layer')
+  await command($, 'model', 'sonnet')
+  await spawn($)
+  expect(seen.spawned[0]?.model).toBeUndefined()
+})
