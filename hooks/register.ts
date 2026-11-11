@@ -563,7 +563,8 @@ export const register: Register = (on, options) => {
     // Run in is drawn on the desktop surface only: a band drawn there means the desktop app, where start_session exists, is attached.
     const desktop = e.surface === 'desktop'
     // The status row waits for the first prompt: before it there is nothing to cost, clear or compact.
-    const prompts = await $.session.turns().then(n => (n ? n + compacted : 0), () => 0)
+    // A compaction can leave no user turn in the transcript, so the summarized ones count too; /clear sets them back to zero.
+    const prompts = await $.session.turns().then(n => n + compacted, () => 0)
     const usage = prompts > 0 ? await $.session.usage().catch(() => undefined) : undefined
     if (!desktop && !refining && !prompts) return next(e)
     const { Box, Button, Select, Text } = $.ui.resolve(e)
@@ -770,7 +771,8 @@ export const register: Register = (on, options) => {
     if (e.turnId) return next(e)
     // ponytail: a live /clear left the next prompt unrated, which fits the turn count still including the cleared conversation's
     // prompts; the flag rates it either way. If a later release resets the count on /clear, the flag is redundant, not wrong.
-    if (!cleared && (await $.session.turns()) > 0) return next(e)
+    // Prompts a compaction summarized away still count: the conversation goes on, so its next prompt is not a first one.
+    if (!cleared && (await $.session.turns()) + compacted > 0) return next(e)
     cleared = false
     // A new first prompt (as after /clear) ends the earlier decision's tracking, even when this one is not rated.
     tracked = undefined
@@ -806,6 +808,9 @@ export const register: Register = (on, options) => {
   // ponytail: one store write per turn whose figures changed; session.measure (pushed, folds bursts) is the move if that ever matters
   on('turn.complete', async ($, e, next) => {
     const t = tracked
+    // session.measure redraws only when the cost or context moved; a turn that moves neither (an API error, a host with no cost
+    // ledger) still changes the prompt count. Redraws fold, so a turn that also measures costs no extra paint.
+    if (!e.agentId) $.ui.invalidate('ui.render')
     if (e.agentId || !t) return next(e)
     // Read apart from the turn count, so a usage reading that fails leaves cost and ctx out without losing the turns.
     const usage = await $.session.usage().catch(() => undefined)
@@ -840,8 +845,8 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // The engine raises this after each main-thread turn whose figures moved, and when a rate-limit window moves. It is the row's only
-  // per-turn redraw: turn.complete's could read $.session.usage() before the figures moved. Rate limits are not on the row.
+  // The engine raises this after each main-thread turn whose figures moved, and when a rate-limit window moves. turn.complete's redraw
+  // can read $.session.usage() before the figures move, so this one shows them. Rate limits are not on the row.
   on('session.measure', ($, e, next) => {
     if (e.changed.includes('cost') || e.changed.includes('context')) $.ui.invalidate('ui.render')
     return next(e)

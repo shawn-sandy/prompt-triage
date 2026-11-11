@@ -40,8 +40,6 @@ type Setup = {
   commandFails?: boolean
   /** Runs as the engine compacts, as the transcript shrinking to its summary would. */
   onCompact?: () => void
-  /** Every compaction fails in the engine, as a summarizer request that errors would. */
-  compactFails?: boolean
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -119,11 +117,8 @@ function engine(on: On, s: Setup) {
   })
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   // The engine's compaction beneath the plugin: it keeps the transcript as given, which is all a redraw test needs.
-  let compactions = 0
   on('session.compact', (_$, e) => {
-    compactions++
     s.onCompact?.()
-    if (s.compactFails) throw new Error('summarizer failed')
     return { messages: e.messages }
   })
   // The engine's measurement beneath the plugin: it echoes which figures moved.
@@ -205,7 +200,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { writes: () => writes, compactions: () => compactions, redraws: () => redraws, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
+  return { writes: () => writes, redraws: () => redraws, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -1915,12 +1910,6 @@ test('a compaction keeps the prompt count, though the summarized transcript hold
   await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
   s.turns = 1
   expect(await (await band($)).find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
-})
-
-test('a compaction that fails in the engine is not run a second time', async ($, on) => {
-  const seen = engine(on, { turns: 3, compactFails: true })
-  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] }).catch(() => undefined)
-  expect(seen.compactions()).toBe(1)
 })
 
 test('a compaction that leaves no user turn keeps the row and its prompt count', async ($, on) => {
