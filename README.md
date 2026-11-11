@@ -262,7 +262,8 @@ cost, how many prompts it has had and how full the context window is, with a
 $0.42 · 3 prompts · 48% context   Clear
 ```
 
-The figures update at the end of each turn. Below 60% context the button reads
+The figures update at the end of each turn, after `/clear` and after a
+compaction. Below 60% context the button reads
 **Clear**, and from 60% it reads **Compact**. Pressing it opens a dialog that
 offers both, with the one the button named marked recommended: **Compact**
 keeps a summary to go on with the task, and **Clear** starts fresh for an
@@ -285,7 +286,8 @@ itself.
 | `prompt.submit` | On any prompt you send (typed, including over a running turn, or through Remote Control) that is not a slash command or a meta prompt while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`, when no turn is running. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
 | `turn.complete` | The end of each main-loop turn. Subagent turns pass through untouched. | Changes nothing in the turn. Redraws the band so the status row's figures update. After a rated first prompt, reads the session's cost, turn count and context percent and, for each that changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
-| `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Stops recording onto the ended session's entry, and after `/clear` marks the next prompt to be rated as a first prompt. |
+| `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Redraws the band so the status row drops the ended conversation's figures. Stops recording onto the ended session's entry, and after `/clear` marks the next prompt to be rated as a first prompt. |
+| `session.compact` | Each compaction of the main conversation: `/compact`, automatic, or the status row's **Compact**. | Changes nothing in the compaction. Redraws the band so the status row shows the new context figures. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given with the band's picks, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/triage-stats` only) | Each run of `/triage-stats`. | Reads the decision log from the store and prints the tally. Changes nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |

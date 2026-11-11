@@ -36,6 +36,8 @@ type Setup = {
   pct?: number | number[]
   /** Every `$.session.turns()` call rejects; set it after the first prompt, which reads the turn count too. */
   turnsFails?: boolean
+  /** Every slash command a test or the mod runs is refused, as a host past its limit would. */
+  commandFails?: boolean
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -112,6 +114,14 @@ function engine(on: On, s: Setup) {
     return { value: undefined }
   })
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  // The engine's compaction beneath the plugin: it keeps the transcript as given, which is all a redraw test needs.
+  on('session.compact', (_$, e) => ({ messages: e.messages }))
+  // Counts band redraws and passes each one on, so a mounted band still redraws.
+  let redraws = 0
+  on('ui.invalidate', ($, e, next) => {
+    redraws++
+    return next(e)
+  })
   // The mod rates with model.complete; a call here is counted so a test can show it never happens.
   on('model.classify', () => {
     classified++
@@ -150,6 +160,7 @@ function engine(on: On, s: Setup) {
   // Every slash command that reaches the engine, by name, so a test sees the status row's Clear or Compact run.
   const ran: string[] = []
   on('command.run', (_$, e) => {
+    if (s.commandFails) throw new Error('command refused')
     ran.push(e.command)
     return { text: '' }
   })
@@ -182,7 +193,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { writes: () => writes, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
+  return { writes: () => writes, redraws: () => redraws, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -1826,8 +1837,44 @@ test('a model the mod cannot rank gets no tier wording', async ($, on) => {
 // The status row: the session's cost, prompts and context fill, and a Clear or Compact button that asks which and runs it.
 
 test('the status row waits for the first prompt', async ($, on) => {
-  engine(on, { turns: 0, usd: 0, pct: 0 })
+  const s: Setup = { turns: 0, usd: 0, pct: 0 }
+  engine(on, s)
   for (const surface of SURFACES) expect(await (await band($, surface)).find({ key: 'status' })).toBeUndefined()
+  s.turns = 1
+  for (const surface of SURFACES) expect(await (await band($, surface)).find({ key: 'status' })).toBeDefined()
+})
+
+test('band: never still draws the status row on the terminal', { options: { band: 'never' } }, async ($, on) => {
+  engine(on, { turns: 2, usd: 0.1, pct: 20, draft: LONG })
+  const ui = await band($)
+  expect(await hasPickers(ui)).toBe(false)
+  expect(await ui.find({ key: 'tidy' })).toBeDefined()
+})
+
+test('a main-loop turn redraws the band for the status row, and a subagent turn does not', async ($, on) => {
+  const seen = engine(on, { turns: 1 })
+  const before = seen.redraws()
+  await complete($, 'agent-1')
+  expect(seen.redraws()).toBe(before)
+  await complete($)
+  expect(seen.redraws()).toBe(before + 1)
+})
+
+test('a typed /clear and a compaction each redraw the band, so the row drops the old figures', async ($, on) => {
+  const seen = engine(on, { turns: 1 })
+  const before = seen.redraws()
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  expect(seen.redraws()).toBe(before + 1)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  expect(seen.redraws()).toBe(before + 2)
+})
+
+test('a Clear or Compact the session refuses says so in a toast', async ($, on) => {
+  const seen = engine(on, { turns: 2, pct: 10, answer: 'Clear (recommended)', commandFails: true })
+  const ui = await band($)
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.toasts.length).toBe(1)
 })
 
 test('the status row shows cost, prompts and context on both surfaces, with or without the pickers', async ($, on) => {

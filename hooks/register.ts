@@ -562,7 +562,7 @@ export const register: Register = (on, options) => {
 
     const percent = usage?.context.percent
     const cost = usage?.cost?.usd
-    // Drawn last, just above the prompt box, so it holds its place as the pickers come and go above it.
+    // Drawn under the refine rows, so it holds its place as the pickers come and go above it.
     const status = prompts
       ? h(
           Box,
@@ -811,7 +811,16 @@ export const register: Register = (on, options) => {
   on('session.end', ($, e, next) => {
     tracked = undefined
     cleared = e.reason === 'clear'
+    // The status row drops the ended conversation's figures, which no prompt edit redraws under band never.
+    $.ui.invalidate('ui.render')
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // A compaction, typed, automatic or the status row's own, changes the context the row shows.
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e)
+    if (!e.agentId) $.ui.invalidate('ui.render')
+    return r
   }).catch(($, e, next) => next(e))
 
   // ponytail: rewrites each request rather than running /model, which cannot run while the prompt waits on this hook
