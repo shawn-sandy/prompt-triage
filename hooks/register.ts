@@ -135,8 +135,10 @@ async function tidy($: EngineInterface, percent: number | undefined): Promise<vo
   const answer = await $.ui
     .ask(`${fill}Compact keeps a summary to go on with this task; Clear starts fresh for an unrelated one. Which?`, { header: 'Context', options })
     .catch(() => undefined)
-  const picked = [CLEAR, COMPACT].find(name => answer === name || answer === `${name} (recommended)`)
-  if (picked) await $.command.run({ command: picked.toLowerCase() })
+  const i = answer === undefined ? -1 : options.indexOf(answer)
+  if (i < 0) return
+  const picked = i === 0 ? first : first === COMPACT ? CLEAR : COMPACT
+  await $.command.run({ command: picked.toLowerCase() })
 }
 
 /** The picks saved in the mod's store, each one that is missing or not an option at its default. */
@@ -493,6 +495,8 @@ async function choose(
 
 export const register: Register = (on, options) => {
   let tidying = false
+  // User turns that compactions summarized away this conversation: turns() counts only those left in the transcript.
+  let compacted = 0
   // The model the person picked for the main loop; undefined leaves the session's own.
   let model: string | undefined
   // The least effort the main loop runs at, or with `exact` the effort it runs at; undefined leaves the session's own.
@@ -559,7 +563,7 @@ export const register: Register = (on, options) => {
     // Run in is drawn on the desktop surface only: a band drawn there means the desktop app, where start_session exists, is attached.
     const desktop = e.surface === 'desktop'
     // The status row waits for the first prompt: before it there is nothing to cost, clear or compact.
-    const prompts = await $.session.turns().catch(() => 0)
+    const prompts = await $.session.turns().then(n => (n ? n + compacted : 0), () => 0)
     const usage = prompts > 0 ? await $.session.usage().catch(() => undefined) : undefined
     if (!desktop && !refining && !prompts) return next(e)
     const { Box, Button, Select, Text } = $.ui.resolve(e)
@@ -832,15 +836,21 @@ export const register: Register = (on, options) => {
   on('session.end', ($, e, next) => {
     tracked = undefined
     cleared = e.reason === 'clear'
+    compacted = 0
     // The status row drops the ended conversation's figures, which no prompt edit redraws under band never.
     $.ui.invalidate('ui.render')
     return next(e)
   }).catch(($, e, next) => next(e))
 
   // A compaction, typed, automatic or the status row's own, changes the context the row shows.
+  // A precompute pass compacts nothing yet, so it neither counts nor redraws.
   on('session.compact', async ($, e, next) => {
+    if (e.agentId || e.trigger === 'precompute') return next(e)
+    const before = await $.session.turns().catch(() => undefined)
     const r = await next(e)
-    if (!e.agentId) $.ui.invalidate('ui.render')
+    const after = await $.session.turns().catch(() => undefined)
+    if (before !== undefined && after !== undefined && after < before) compacted += before - after
+    $.ui.invalidate('ui.render')
     return r
   }).catch(($, e, next) => next(e))
 

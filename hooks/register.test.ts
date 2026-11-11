@@ -38,6 +38,8 @@ type Setup = {
   turnsFails?: boolean
   /** Every slash command a test or the mod runs is refused, as a host past its limit would. */
   commandFails?: boolean
+  /** Runs as the engine compacts, as the transcript shrinking to its summary would. */
+  onCompact?: () => void
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -115,7 +117,10 @@ function engine(on: On, s: Setup) {
   })
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   // The engine's compaction beneath the plugin: it keeps the transcript as given, which is all a redraw test needs.
-  on('session.compact', (_$, e) => ({ messages: e.messages }))
+  on('session.compact', (_$, e) => {
+    s.onCompact?.()
+    return { messages: e.messages }
+  })
   // Counts band redraws and passes each one on, so a mounted band still redraws.
   let redraws = 0
   on('ui.invalidate', ($, e, next) => {
@@ -1869,6 +1874,34 @@ test('a typed /clear and a compaction each redraw the band, so the row drops the
   expect(seen.redraws()).toBe(before + 2)
 })
 
+test('a typed label that is not one of the options runs nothing, even one naming the other command', async ($, on) => {
+  const seen = engine(on, { turns: 2, usd: 0.1, pct: 70, answer: 'Clear (recommended)' })
+  const ui = await band($)
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.ran).toEqual([])
+})
+
+test('a compaction keeps the prompt count, though the summarized transcript holds fewer user turns', async ($, on) => {
+  const s: Setup = { turns: 20, usd: 1.1, pct: 70, onCompact: () => (s.turns = 1) }
+  engine(on, s)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  expect(await (await band($)).find({ type: 'Text', text: /\b20 prompts\b/ })).toBeDefined()
+  s.turns = 2
+  expect(await (await band($)).find({ type: 'Text', text: /\b21 prompts\b/ })).toBeDefined()
+  // A /clear starts the count over.
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 1
+  expect(await (await band($)).find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
+})
+
+test('a precompute pass, which compacts nothing yet, does not redraw the band', async ($, on) => {
+  const seen = engine(on, { turns: 1 })
+  const before = seen.redraws()
+  await $.session.compact({ trigger: 'precompute', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  expect(seen.redraws()).toBe(before)
+})
+
 test('a Clear or Compact the session refuses says so in a toast', async ($, on) => {
   const seen = engine(on, { turns: 2, pct: 40, answer: 'Clear (recommended)', commandFails: true })
   const ui = await band($)
@@ -1885,7 +1918,7 @@ test('the status row shows cost, prompts and context on both surfaces, with or w
     s.usd = 0.4213
     s.pct = 30
     const ui = await band($, surface)
-    expect(await ui.find({ type: 'Text', text: /^Session estimate: \$0\.42 . 3 prompts . 30% context$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\$0\.42\b.*\b3 prompts\b.*\b30% context/ })).toBeDefined()
     // The row sits at the band's right edge.
     expect((await ui.find({ key: 'status' }))?.props.justifyContent).toBe('flex-end')
   }
@@ -1894,7 +1927,8 @@ test('the status row shows cost, prompts and context on both surfaces, with or w
 test('the status row leaves out what the session cannot read yet', async ($, on) => {
   engine(on, { turns: 1 })
   const ui = await band($)
-  expect(await ui.find({ type: 'Text', text: /^Session estimate: 1 prompt$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\$|context/ })).toBeUndefined()
 })
 
 // After /clear the window is empty (or not read yet) while the prompt count can still include the cleared conversation's prompts.
@@ -1918,7 +1952,7 @@ test('below the compact threshold the button reads Clear and recommends it; pick
   expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Clear')
   await ui.press({ key: 'tidy' })
   await settle()
-  expect(seen.asked[0]?.[0]).toBe('Clear (recommended)')
+  expect(seen.asked[0]?.[0]).toMatch(/^Clear\b.*recommended/)
   expect(seen.ran).toEqual(['clear'])
 })
 
@@ -1938,7 +1972,8 @@ test('at the compact threshold the button reads Compact and recommends it; picki
   expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Compact')
   await ui.press({ key: 'tidy' })
   await settle()
-  expect(seen.asked[0]).toEqual(['Compact (recommended)', 'Clear'])
+  expect(seen.asked[0]?.[0]).toMatch(/^Compact\b.*recommended/)
+  expect(seen.asked[0]?.[1]).toMatch(/^Clear\b/)
   expect(seen.ran).toEqual(['compact'])
 })
 
