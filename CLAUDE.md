@@ -73,6 +73,12 @@ before changing a rating, a model suggestion or an effort minimum.
 - [Steering thinking](https://platform.claude.com/docs/en/build-with-claude/thinking-steering-and-cost):
   how effort levels, prompt guidance and per-message steering control how often and how deeply
   Claude thinks, and what that costs.
+- [Which Claude model should you build with?](https://claude.dev/blog/which-claude-model-should-you-build-with/)
+  (Addy Osmani, claude.dev blog, 2026-11-09): a starting model and effort per task type, the
+  escalation order (self-verification, then one effort level, then the next model up at a lower
+  effort), the cache cost of switching models mid-conversation, putting subagents on smaller
+  models, and default effort per model in Claude Code versus the API. A blog post, not docs:
+  check its numbers against the models overview before quoting them.
 
 ## Commands
 
