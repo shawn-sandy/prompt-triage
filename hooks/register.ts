@@ -3,8 +3,8 @@ import type { EngineInterface, ModelEffort, PromptSubmitInput, Register, RenderE
 // Each rating and the model alias it suggests.
 const SUGGEST = { simple: 'haiku', moderate: 'sonnet', complex: 'opus', 'long-running': 'fable' } as const
 type Rating = keyof typeof SUGGEST
-// The least effort each rating runs at; simple leaves the session's own. Medium is at or below every model's Claude Code default
-// (Opus 5.5 and Fable 5.2 both run at medium), so the minimum only catches effort the person lowered by hand.
+// The least effort each rating runs at; simple leaves the session's own. Medium is at or below the defaults the model-selection post gives
+// (Opus 5.5 medium; Fable 5.2 medium in Claude Code), so the minimum only catches effort the person lowered by hand.
 const FLOOR: Record<Rating, ModelEffort | undefined> = { simple: undefined, moderate: 'medium', complex: 'medium', 'long-running': 'medium' }
 const LEVELS: readonly ModelEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 // The two ratings that want the strongest model, so one already at or above the suggestion fits.

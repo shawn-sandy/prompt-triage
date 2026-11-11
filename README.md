@@ -113,14 +113,17 @@ alone. The dialog does not mention the minimum, since no model's default effort
 is below it. The minimum applies whichever model you choose, and also when no
 dialog is shown.
 
-The minimums guard against an effort lowered by hand. Claude Code runs Opus 5.5
-and Fable 5.2 at `medium` by default, so at the default the minimum changes
-nothing; it acts only after you set `low`. The Claude API's own defaults differ
-(`high` on Fable 5.2 and Sonnet 5.5, `medium` on Opus 5.5 and Haiku 5.5, per
+The minimums guard against an effort lowered by hand. Opus 5.5 defaults to
+`medium`, and Claude Code runs Fable 5.2 at `medium` by default, per
+[Which Claude model should you build with?](https://claude.dev/blog/which-claude-model-should-you-build-with/),
+which also notes that Claude Code's defaults can differ from the API's and that
+`/effort status` shows yours. At those defaults the `medium` minimum changes
+nothing; it acts only after you set `low`. The Claude API's own defaults are
+`high` on Fable 5.2 and Sonnet 5.5 and `medium` on Opus 5.5 and Haiku 5.5, per
 Anthropic's
-[models overview](https://platform.claude.com/docs/en/about-claude/models/overview)),
-which is why a minimum of `high` would have raised effort on default Claude Code
-sessions and not only on lowered ones.
+[models overview](https://platform.claude.com/docs/en/about-claude/models/overview),
+so a minimum of `high` would have raised effort on a default Fable session and
+not only on a lowered one.
 
 Choosing **Keep model, effort low** for a `simple` prompt is the one case
 where the mod lowers effort: every main-loop request that names an effort

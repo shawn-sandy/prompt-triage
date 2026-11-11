@@ -2274,3 +2274,31 @@ test('a /model of the persons own ends the Explore routing', async ($, on) => {
   await spawn($)
   expect(seen.spawned[0]?.model).toBeUndefined()
 })
+
+// --- The plan's Final check, end to end, with the prompt it names ---
+
+test('the plan\'s Final check: refine with a check, switch to opus, Explore on haiku, effort logged and tallied', async ($, on) => {
+  const PROMPT = 'Redesign the auth layer so sessions survive a server restart'
+  const today = new Date().toISOString().slice(0, 10)
+  const seen = engine(on, { answer: ['Refine prompt', 'Switch to opus'], review: REVIEWED, usd: [0, 2] })
+
+  // First send: rated complex on Sonnet, no effort sentence, and Refine prompt asks the reviewer for a check.
+  await submit($, PROMPT)
+  expect(seen.questions[0]).toContain('Rated complex')
+  expect(seen.questions[0]).not.toContain('Effort will be at least')
+  expect(seen.reviews[0]?.system).toContain(CHECK_LINE)
+
+  // Sent again: Switch to opus. Main-loop requests run on opus at the medium minimum, and Explore runs on haiku.
+  await submit($, PROMPT)
+  await step($, undefined, 'low')
+  expect([seen.steps[0]?.model, seen.steps[0]?.effort]).toEqual(['opus', 'medium'])
+  await spawn($)
+  expect(seen.spawned[0]?.model).toBe('haiku')
+
+  // The one session is logged once, with its effort and date, and /triage-stats tallies it from today on.
+  await complete($)
+  expect(seen.store.decisions).toMatchObject([{ rating: 'complex', chose: 'Switch to opus', effort: 'medium', cost: 2, at: today }])
+  const { text } = await command($, 'triage-stats', `since ${today}`)
+  expect(text).toContain(`1 decision logged since ${today}`)
+  expect(text).toContain('| complex | medium | 1 | $2.00 |')
+})
