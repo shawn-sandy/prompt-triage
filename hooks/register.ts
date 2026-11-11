@@ -125,8 +125,8 @@ const COMPACT = 'Compact'
 /**
  * The status row's button: asks whether to clear or compact, the one the context fill favours listed first and marked recommended,
  * and runs that command. A dismissed dialog, or free text under "Other" that is not exactly an option's label, runs nothing: either
- * command loses or rewrites the conversation. `$.ui.ask` answers a typed label the same as a picked one, so typing "Clear" clears,
- * which is what the person asked for.
+ * command loses or rewrites the conversation. `$.ui.ask` answers a typed label the same as a picked one, so typing a label in full,
+ * "Clear (recommended)" included, runs it; a bare "Clear" when Clear is the recommended option is not a label and runs nothing.
  */
 async function tidy($: EngineInterface, percent: number | undefined): Promise<void> {
   const first = (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR
@@ -806,8 +806,6 @@ export const register: Register = (on, options) => {
   // ponytail: one store write per turn whose figures changed; session.measure (pushed, folds bursts) is the move if that ever matters
   on('turn.complete', async ($, e, next) => {
     const t = tracked
-    // The status row's cost, prompts and context change with each main-loop turn.
-    if (!e.agentId) $.ui.invalidate('ui.render')
     if (e.agentId || !t) return next(e)
     // Read apart from the turn count, so a usage reading that fails leaves cost and ctx out without losing the turns.
     const usage = await $.session.usage().catch(() => undefined)
@@ -842,8 +840,8 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // The engine raises this when the figures $.session.usage() answers have moved: after each turn, and mid-turn as responses come in.
-  // turn.complete's redraw alone can read them before they move, which left the row on old figures. Rate limits are not on the row.
+  // The engine raises this after each main-thread turn whose figures moved, and when a rate-limit window moves. It is the row's only
+  // per-turn redraw: turn.complete's could read $.session.usage() before the figures moved. Rate limits are not on the row.
   on('session.measure', ($, e, next) => {
     if (e.changed.includes('cost') || e.changed.includes('context')) $.ui.invalidate('ui.render')
     return next(e)

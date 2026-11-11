@@ -40,6 +40,8 @@ type Setup = {
   commandFails?: boolean
   /** Runs as the engine compacts, as the transcript shrinking to its summary would. */
   onCompact?: () => void
+  /** Every compaction fails in the engine, as a summarizer request that errors would. */
+  compactFails?: boolean
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -117,8 +119,11 @@ function engine(on: On, s: Setup) {
   })
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   // The engine's compaction beneath the plugin: it keeps the transcript as given, which is all a redraw test needs.
+  let compactions = 0
   on('session.compact', (_$, e) => {
+    compactions++
     s.onCompact?.()
+    if (s.compactFails) throw new Error('summarizer failed')
     return { messages: e.messages }
   })
   // The engine's measurement beneath the plugin: it echoes which figures moved.
@@ -200,7 +205,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { writes: () => writes, redraws: () => redraws, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
+  return { writes: () => writes, compactions: () => compactions, redraws: () => redraws, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -1858,7 +1863,9 @@ test('band: never still draws the status row on the terminal', { options: { band
   expect(await ui.find({ key: 'tidy' })).toBeDefined()
 })
 
-test('a main-loop turn redraws the band for the status row, and a subagent turn does not', async ($, on) => {
+// session.measure redraws only when the cost or context moved; a turn that moves neither (an API error, a host with no cost ledger)
+// still changes the prompt count, so the end of a main-loop turn redraws too.
+test('a main-loop turn redraws the band for the prompt count, and a subagent turn does not', async ($, on) => {
   const seen = engine(on, { turns: 1 })
   const before = seen.redraws()
   await complete($, 'agent-1')
@@ -1908,6 +1915,28 @@ test('a compaction keeps the prompt count, though the summarized transcript hold
   await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
   s.turns = 1
   expect(await (await band($)).find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
+})
+
+test('a compaction that fails in the engine is not run a second time', async ($, on) => {
+  const seen = engine(on, { turns: 3, compactFails: true })
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] }).catch(() => undefined)
+  expect(seen.compactions()).toBe(1)
+})
+
+test('a compaction that leaves no user turn keeps the row and its prompt count', async ($, on) => {
+  const s: Setup = { turns: 20, usd: 1.1, pct: 70, onCompact: () => (s.turns = 0) }
+  engine(on, s)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  expect(await (await band($)).find({ type: 'Text', text: /\b20 prompts\b/ })).toBeDefined()
+})
+
+test('the prompt after a compaction that leaves no user turn is not rated as a first prompt', async ($, on) => {
+  const s: Setup = { turns: 5, onCompact: () => (s.turns = 0) }
+  const seen = engine(on, s)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  await submit($, 'Redesign the auth layer across three services')
+  expect(seen.ratings).toEqual([])
+  expect(seen.asked).toEqual([])
 })
 
 test('a precompute pass, which compacts nothing yet, does not redraw the band', async ($, on) => {
