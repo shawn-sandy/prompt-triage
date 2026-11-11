@@ -124,7 +124,9 @@ const COMPACT = 'Compact'
 
 /**
  * The status row's button: asks whether to clear or compact, the one the context fill favours listed first and marked recommended,
- * and runs that command. A dismissed dialog, or free text under "Other", runs nothing: either loses or rewrites the conversation.
+ * and runs that command. A dismissed dialog, or free text under "Other" that is not exactly an option's label, runs nothing: either
+ * command loses or rewrites the conversation. `$.ui.ask` answers a typed label the same as a picked one, so typing "Clear" clears,
+ * which is what the person asked for.
  */
 async function tidy($: EngineInterface, percent: number | undefined): Promise<void> {
   const first = (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR
