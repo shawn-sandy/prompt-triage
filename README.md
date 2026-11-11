@@ -264,8 +264,8 @@ button:
 ```
 
 The figures update at the end of each turn, after `/clear` and after a
-compaction. Below 30% context, or before a fresh conversation's first
-response, the row draws no button, since nothing needs clearing. From 30% the
+compaction. Below 25% context, or before a fresh conversation's first
+response, the row draws no button, since nothing needs clearing. From 25% the
 button reads **Clear**, and from 60% it reads **Compact**. Pressing it opens a dialog that
 offers both, with the one the button named marked recommended: **Compact**
 keeps a summary to go on with the task, and **Clear** starts fresh for an

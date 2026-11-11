@@ -117,7 +117,7 @@ const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
 // ponytail: fixed context percents. Below CLEAR_AT the window holds too little to need either, as right after /clear, so the row
 // draws no button; from it the button offers Clear, and from COMPACT_AT Compact, where a summary is worth keeping. The engine's own
 // auto-compact window is not read (only a usage breakdown carries it); tune these, or read it, if the button shows too early or late.
-const CLEAR_AT = 30
+const CLEAR_AT = 25
 const COMPACT_AT = 60
 const CLEAR = 'Clear'
 const COMPACT = 'Compact'

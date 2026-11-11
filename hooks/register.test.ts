@@ -1898,7 +1898,7 @@ test('the status row leaves out what the session cannot read yet', async ($, on)
 })
 
 // After /clear the window is empty (or not read yet) while the prompt count can still include the cleared conversation's prompts.
-for (const pct of [undefined, 0, 29] as const) {
+for (const pct of [undefined, 0, 24] as const) {
   test(`a context fill of ${pct ?? 'unknown'} needs no clear, so the row draws no button`, async ($, on) => {
     engine(on, { turns: 3, usd: 0.2, pct })
     const ui = await band($)
@@ -1907,8 +1907,8 @@ for (const pct of [undefined, 0, 29] as const) {
   })
 }
 
-test('from 30% context the button reads Clear', async ($, on) => {
-  engine(on, { turns: 3, usd: 0.2, pct: 30 })
+test('from 25% context the button reads Clear', async ($, on) => {
+  engine(on, { turns: 3, usd: 0.2, pct: 25 })
   expect((await (await band($)).find({ key: 'tidy' }))?.props.label).toBe('Clear')
 })
 
