@@ -274,7 +274,7 @@ Closing the dialog runs nothing. The row shows whatever the `band` setting is.
 
 ## Hooks
 
-The mod registers twelve hooks in `hooks/register.ts`. `prompt.submit` and
+The mod registers thirteen hooks in `hooks/register.ts`. `prompt.submit` and
 `command.run` are also the names of calls, so these hooks run whenever a
 prompt is submitted or `/model`, `/effort`, `/refine-prompt` or `/triage-stats` is run, whether you do it or
 other code (the app, another mod) does. The mod never makes either call
@@ -446,7 +446,7 @@ node scripts/eval-rating.mjs --runs 3
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the twelve hooks and the `/refine-prompt` and `/triage-stats` commands. |
+| `hooks/register.ts` | All of the mod's logic: the thirteen hooks and the `/refine-prompt` and `/triage-stats` commands. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
 | `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`, once or averaged over `--runs N`. |

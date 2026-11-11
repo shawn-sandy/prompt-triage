@@ -1922,6 +1922,16 @@ test('below the compact threshold the button reads Clear and recommends it; pick
   expect(seen.ran).toEqual(['clear'])
 })
 
+test('pressing the button twice before the dialog closes asks and runs once', async ($, on) => {
+  const seen = engine(on, { turns: 2, usd: 0.1, pct: 59, answer: ['Clear (recommended)', 'Clear (recommended)'] })
+  const ui = await band($)
+  await ui.press({ key: 'tidy' })
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.asked).toHaveLength(1)
+  expect(seen.ran).toEqual(['clear'])
+})
+
 test('at the compact threshold the button reads Compact and recommends it; picking it runs /compact', async ($, on) => {
   const seen = engine(on, { turns: 2, usd: 0.1, pct: 60, answer: 'Compact (recommended)' })
   const ui = await band($)

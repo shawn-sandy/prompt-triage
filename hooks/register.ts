@@ -492,6 +492,7 @@ async function choose(
 }
 
 export const register: Register = (on, options) => {
+  let tidying = false
   // The model the person picked for the main loop; undefined leaves the session's own.
   let model: string | undefined
   // The least effort the main loop runs at, or with `exact` the effort it runs at; undefined leaves the session's own.
@@ -586,8 +587,20 @@ export const register: Register = (on, options) => {
                 key: 'tidy',
                 label: (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR,
                 // The dialog waits on the person and the command on an idle session, past the press's 10 s budget, so both run from a timer.
+                // A press while the dialog is open is dropped, so one answer cannot run the command twice.
                 onPress: () => {
-                  $.clock.after(0, () => void tidy($, percent).catch(() => $.ui.toast('Clear or compact failed')).finally(redraw))
+                  if (tidying) return
+                  tidying = true
+                  $.clock.after(
+                    0,
+                    () =>
+                      void tidy($, percent)
+                        .catch(() => $.ui.toast('Clear or compact failed'))
+                        .finally(() => {
+                          tidying = false
+                          redraw()
+                        }),
+                  )
                 },
               }),
         )
