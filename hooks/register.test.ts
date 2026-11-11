@@ -147,7 +147,12 @@ function engine(on: On, s: Setup) {
     steps.push(e)
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
   })
-  on('command.run', () => ({ text: '' }))
+  // Every slash command that reaches the engine, by name, so a test sees the status row's Clear or Compact run.
+  const ran: string[] = []
+  on('command.run', (_$, e) => {
+    ran.push(e.command)
+    return { text: '' }
+  })
   on('model.complete', (_$, e) => {
     completes++
     // The rater and the reviewer share this call; each one's system prompt tells them apart.
@@ -177,7 +182,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { writes: () => writes, store, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
+  return { writes: () => writes, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -1817,3 +1822,58 @@ test('a model the mod cannot rank gets no tier wording', async ($, on) => {
   await submit($, 'Add a retry limit to the upload client')
   expect(seen.questions[0]).not.toMatch(/tier/i)
 })
+
+// The status row: the session's cost, prompts and context fill, and a Clear or Compact button that asks which and runs it.
+
+test('the status row waits for the first prompt', async ($, on) => {
+  engine(on, { turns: 0, usd: 0, pct: 0 })
+  for (const surface of SURFACES) expect(await (await band($, surface)).find({ key: 'status' })).toBeUndefined()
+})
+
+test('the status row shows cost, prompts and context on both surfaces, with or without the pickers', async ($, on) => {
+  const s: Setup = { turns: 3, surfaces: ['desktop'] }
+  engine(on, s)
+  for (const [surface, draft] of [['terminal', ''], ['desktop', ''], ['terminal', LONG]] as const) {
+    s.draft = draft
+    s.usd = 0.4213
+    s.pct = 30
+    const ui = await band($, surface)
+    expect(await ui.find({ type: 'Text', text: /\$0\.42 . 3 prompts . 30% context/ })).toBeDefined()
+  }
+})
+
+test('the status row leaves out what the session cannot read yet', async ($, on) => {
+  engine(on, { turns: 1 })
+  const ui = await band($)
+  expect(await ui.find({ type: 'Text', text: /^1 prompt$/ })).toBeDefined()
+})
+
+test('below the compact threshold the button reads Clear and recommends it; picking it runs /clear', async ($, on) => {
+  const seen = engine(on, { turns: 2, usd: 0.1, pct: 59, answer: 'Clear (recommended)' })
+  const ui = await band($)
+  expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Clear')
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.asked[0]?.[0]).toBe('Clear (recommended)')
+  expect(seen.ran).toEqual(['clear'])
+})
+
+test('at the compact threshold the button reads Compact and recommends it; picking it runs /compact', async ($, on) => {
+  const seen = engine(on, { turns: 2, usd: 0.1, pct: 60, answer: 'Compact (recommended)' })
+  const ui = await band($)
+  expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Compact')
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.asked[0]).toEqual(['Compact (recommended)', 'Clear'])
+  expect(seen.ran).toEqual(['compact'])
+})
+
+for (const [answer, ran] of [['Compact', ['compact']], [undefined, []], ['compact it please', []]] as const) {
+  test(`answering ${answer ?? 'nothing'} under a Clear recommendation runs ${ran[0] ?? 'nothing'}`, async ($, on) => {
+    const seen = engine(on, { turns: 2, usd: 0.1, pct: 10, answer })
+    const ui = await band($)
+    await ui.press({ key: 'tidy' })
+    await settle()
+    expect(seen.ran).toEqual(ran)
+  })
+}

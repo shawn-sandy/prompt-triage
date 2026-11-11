@@ -114,6 +114,26 @@ type Picks = { [K in Picker]: keyof (typeof PICKERS)[K]['options'] & string }
 // wrapped Run in line sat against the buttons above it (as reported); the mod API types draw a step as 0 rows down on the terminal.
 const ROW = { columnGap: 1, rowGap: 'sm', flexWrap: 'wrap' } as const
 const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
+// ponytail: one fixed context percent from which the status row recommends Compact over Clear; the engine's own auto-compact
+// window is not read (only a usage breakdown carries it). Below it a summary saves little, so a fresh start is the lighter move.
+const COMPACT_AT = 60
+const CLEAR = 'Clear'
+const COMPACT = 'Compact'
+
+/**
+ * The status row's button: asks whether to clear or compact, the one the context fill favours listed first and marked recommended,
+ * and runs that command. A dismissed dialog, or free text under "Other", runs nothing: either loses or rewrites the conversation.
+ */
+async function tidy($: EngineInterface, percent: number | undefined): Promise<void> {
+  const first = (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR
+  const options = [`${first} (recommended)`, first === COMPACT ? CLEAR : COMPACT]
+  const fill = percent === undefined ? '' : `Context is ${percent}% full. `
+  const answer = await $.ui
+    .ask(`${fill}Compact keeps a summary to go on with this task; Clear starts fresh for an unrelated one. Which?`, { header: 'Context', options })
+    .catch(() => undefined)
+  const picked = [CLEAR, COMPACT].find(name => answer === name || answer === `${name} (recommended)`)
+  if (picked) await $.command.run({ command: picked.toLowerCase() })
+}
 
 /** The picks saved in the mod's store, each one that is missing or not an option at its default. */
 async function loadPicks($: EngineInterface): Promise<Picks> {
@@ -533,9 +553,37 @@ export const register: Register = (on, options) => {
     const refining = options.band !== 'never' && (result !== undefined || shown)
     // Run in is drawn on the desktop surface only: a band drawn there means the desktop app, where start_session exists, is attached.
     const desktop = e.surface === 'desktop'
-    if (!desktop && !refining) return next(e)
+    // The status row waits for the first prompt: before it there is nothing to cost, clear or compact.
+    const prompts = await $.session.turns().catch(() => 0)
+    const usage = prompts > 0 ? await $.session.usage().catch(() => undefined) : undefined
+    if (!desktop && !refining && !prompts) return next(e)
     const { Box, Button, Select, Text } = $.ui.resolve(e)
     const redraw = () => $.ui.invalidate('ui.render')
+
+    const percent = usage?.context.percent
+    const cost = usage?.cost?.usd
+    // Drawn last, just above the prompt box, so it holds its place as the pickers come and go above it.
+    const status = prompts
+      ? h(
+          Box,
+          { key: 'status', ...ROW },
+          h(
+            Text,
+            { dimColor: true },
+            [cost === undefined ? '' : usd(cost), `${prompts} prompt${prompts === 1 ? '' : 's'}`, percent === undefined ? '' : `${percent}% context`]
+              .filter(Boolean)
+              .join(' · '),
+          ),
+          h(Button, {
+            key: 'tidy',
+            label: (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR,
+            // The dialog waits on the person and the command on an idle session, past the press's 10 s budget, so both run from a timer.
+            onPress: () => {
+              $.clock.after(0, () => void tidy($, percent).catch(() => $.ui.toast('Clear or compact failed')).finally(redraw))
+            },
+          }),
+        )
+      : null
 
     const runIn = desktop
       ? h(Select, {
@@ -600,8 +648,10 @@ export const register: Register = (on, options) => {
       },
     })
 
-    if (!refining) return h(Box, null, runIn, await next(e)) as RenderElement
-    if (!result) return h(Box, { flexDirection: 'column' }, h(Box, ROW, h(Text, { dimColor: true }, 'Refine'), ...pickers, runIn, refine), await next(e)) as RenderElement
+    if (!refining) return h(Box, { flexDirection: 'column' }, status, h(Box, null, runIn, await next(e))) as RenderElement
+    if (!result) {
+      return h(Box, { flexDirection: 'column' }, h(Box, ROW, h(Text, { dimColor: true }, 'Refine'), ...pickers, runIn, refine), status, await next(e)) as RenderElement
+    }
 
     const last = result
     const count = last.issues.length
@@ -640,7 +690,7 @@ export const register: Register = (on, options) => {
       runIn,
     )
     const list = last.expanded ? h(Box, { flexDirection: 'column' }, ...last.issues.map(issue => h(Text, null, `- ${issue}`))) : null
-    return h(Box, { flexDirection: 'column' }, row, list, await next(e)) as RenderElement
+    return h(Box, { flexDirection: 'column' }, row, list, status, await next(e)) as RenderElement
   })
 
   // The band redraws when its show rule's answer flips (the draft empties, crosses 40 characters, gains a line break, starts with /),
@@ -731,6 +781,8 @@ export const register: Register = (on, options) => {
   // ponytail: one store write per turn whose figures changed; session.measure (pushed, folds bursts) is the move if that ever matters
   on('turn.complete', async ($, e, next) => {
     const t = tracked
+    // The status row's cost, prompts and context change with each main-loop turn.
+    if (!e.agentId) $.ui.invalidate('ui.render')
     if (e.agentId || !t) return next(e)
     // Read apart from the turn count, so a usage reading that fails leaves cost and ctx out without losing the turns.
     const usage = await $.session.usage().catch(() => undefined)
