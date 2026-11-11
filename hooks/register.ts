@@ -114,8 +114,10 @@ type Picks = { [K in Picker]: keyof (typeof PICKERS)[K]['options'] & string }
 // wrapped Run in line sat against the buttons above it (as reported); the mod API types draw a step as 0 rows down on the terminal.
 const ROW = { columnGap: 1, rowGap: 'sm', flexWrap: 'wrap' } as const
 const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
-// ponytail: one fixed context percent from which the status row recommends Compact over Clear; the engine's own auto-compact
-// window is not read (only a usage breakdown carries it). Below it a summary saves little, so a fresh start is the lighter move.
+// ponytail: fixed context percents. Below CLEAR_AT the window holds too little to need either, as right after /clear, so the row
+// draws no button; from it the button offers Clear, and from COMPACT_AT Compact, where a summary is worth keeping. The engine's own
+// auto-compact window is not read (only a usage breakdown carries it); tune these, or read it, if the button shows too early or late.
+const CLEAR_AT = 30
 const COMPACT_AT = 60
 const CLEAR = 'Clear'
 const COMPACT = 'Compact'
@@ -575,14 +577,17 @@ export const register: Register = (on, options) => {
               .filter(Boolean)
               .join(' · ')}`,
           ),
-          h(Button, {
-            key: 'tidy',
-            label: (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR,
-            // The dialog waits on the person and the command on an idle session, past the press's 10 s budget, so both run from a timer.
-            onPress: () => {
-              $.clock.after(0, () => void tidy($, percent).catch(() => $.ui.toast('Clear or compact failed')).finally(redraw))
-            },
-          }),
+          // An unknown fill (a fresh window, before its first response) counts as empty.
+          (percent ?? 0) < CLEAR_AT
+            ? null
+            : h(Button, {
+                key: 'tidy',
+                label: (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR,
+                // The dialog waits on the person and the command on an idle session, past the press's 10 s budget, so both run from a timer.
+                onPress: () => {
+                  $.clock.after(0, () => void tidy($, percent).catch(() => $.ui.toast('Clear or compact failed')).finally(redraw))
+                },
+              }),
         )
       : null
 

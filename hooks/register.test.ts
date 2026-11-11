@@ -1845,7 +1845,7 @@ test('the status row waits for the first prompt', async ($, on) => {
 })
 
 test('band: never still draws the status row on the terminal', { options: { band: 'never' } }, async ($, on) => {
-  engine(on, { turns: 2, usd: 0.1, pct: 20, draft: LONG })
+  engine(on, { turns: 2, usd: 0.1, pct: 40, draft: LONG })
   const ui = await band($)
   expect(await hasPickers(ui)).toBe(false)
   expect(await ui.find({ key: 'tidy' })).toBeDefined()
@@ -1870,7 +1870,7 @@ test('a typed /clear and a compaction each redraw the band, so the row drops the
 })
 
 test('a Clear or Compact the session refuses says so in a toast', async ($, on) => {
-  const seen = engine(on, { turns: 2, pct: 10, answer: 'Clear (recommended)', commandFails: true })
+  const seen = engine(on, { turns: 2, pct: 40, answer: 'Clear (recommended)', commandFails: true })
   const ui = await band($)
   await ui.press({ key: 'tidy' })
   await settle()
@@ -1897,6 +1897,21 @@ test('the status row leaves out what the session cannot read yet', async ($, on)
   expect(await ui.find({ type: 'Text', text: /^Session estimate: 1 prompt$/ })).toBeDefined()
 })
 
+// After /clear the window is empty (or not read yet) while the prompt count can still include the cleared conversation's prompts.
+for (const pct of [undefined, 0, 29] as const) {
+  test(`a context fill of ${pct ?? 'unknown'} needs no clear, so the row draws no button`, async ($, on) => {
+    engine(on, { turns: 3, usd: 0.2, pct })
+    const ui = await band($)
+    expect(await ui.find({ key: 'status' })).toBeDefined()
+    expect(await ui.find({ key: 'tidy' })).toBeUndefined()
+  })
+}
+
+test('from 30% context the button reads Clear', async ($, on) => {
+  engine(on, { turns: 3, usd: 0.2, pct: 30 })
+  expect((await (await band($)).find({ key: 'tidy' }))?.props.label).toBe('Clear')
+})
+
 test('below the compact threshold the button reads Clear and recommends it; picking it runs /clear', async ($, on) => {
   const seen = engine(on, { turns: 2, usd: 0.1, pct: 59, answer: 'Clear (recommended)' })
   const ui = await band($)
@@ -1919,7 +1934,7 @@ test('at the compact threshold the button reads Compact and recommends it; picki
 
 for (const [answer, ran] of [['Compact', ['compact']], [undefined, []], ['compact it please', []]] as const) {
   test(`answering ${answer ?? 'nothing'} under a Clear recommendation runs ${ran[0] ?? 'nothing'}`, async ($, on) => {
-    const seen = engine(on, { turns: 2, usd: 0.1, pct: 10, answer })
+    const seen = engine(on, { turns: 2, usd: 0.1, pct: 40, answer })
     const ui = await band($)
     await ui.press({ key: 'tidy' })
     await settle()
