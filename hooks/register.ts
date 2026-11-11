@@ -562,17 +562,18 @@ export const register: Register = (on, options) => {
 
     const percent = usage?.context.percent
     const cost = usage?.cost?.usd
-    // Drawn under the refine rows, so it holds its place as the pickers come and go above it.
+    // Drawn under the refine rows, so it holds its place as the pickers come and go above it, and at the right edge, apart from them.
+    // The cost is the engine's own estimate, as /cost gives it, so the line says so.
     const status = prompts
       ? h(
           Box,
-          { key: 'status', ...ROW },
+          { key: 'status', ...ROW, justifyContent: 'flex-end' },
           h(
             Text,
             { dimColor: true },
-            [cost === undefined ? '' : usd(cost), `${prompts} prompt${prompts === 1 ? '' : 's'}`, percent === undefined ? '' : `${percent}% context`]
+            `Session estimate: ${[cost === undefined ? '' : usd(cost), `${prompts} prompt${prompts === 1 ? '' : 's'}`, percent === undefined ? '' : `${percent}% context`]
               .filter(Boolean)
-              .join(' · '),
+              .join(' · ')}`,
           ),
           h(Button, {
             key: 'tidy',

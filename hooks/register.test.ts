@@ -1885,14 +1885,16 @@ test('the status row shows cost, prompts and context on both surfaces, with or w
     s.usd = 0.4213
     s.pct = 30
     const ui = await band($, surface)
-    expect(await ui.find({ type: 'Text', text: /\$0\.42 . 3 prompts . 30% context/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Session estimate: \$0\.42 . 3 prompts . 30% context$/ })).toBeDefined()
+    // The row sits at the band's right edge.
+    expect((await ui.find({ key: 'status' }))?.props.justifyContent).toBe('flex-end')
   }
 })
 
 test('the status row leaves out what the session cannot read yet', async ($, on) => {
   engine(on, { turns: 1 })
   const ui = await band($)
-  expect(await ui.find({ type: 'Text', text: /^1 prompt$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Session estimate: 1 prompt$/ })).toBeDefined()
 })
 
 test('below the compact threshold the button reads Clear and recommends it; picking it runs /clear', async ($, on) => {

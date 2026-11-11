@@ -254,12 +254,13 @@ prompt, so the model dialog does not offer **Refine prompt** again for it.
 
 ### The status row
 
-After the first prompt, the bottom row of the band shows what the session has
-cost, how many prompts it has had and how full the context window is, with a
-**Clear** or **Compact** button:
+After the first prompt, the bottom row of the band shows a **Session
+estimate** at its right edge: what the session has cost, how many prompts it
+has had and how full the context window is, with a **Clear** or **Compact**
+button:
 
 ```text
-$0.42 · 3 prompts · 48% context   Clear
+                    Session estimate: $0.42 · 3 prompts · 48% context   Clear
 ```
 
 The figures update at the end of each turn, after `/clear` and after a
