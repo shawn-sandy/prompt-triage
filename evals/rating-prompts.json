@@ -161,5 +161,13 @@
   { "expected": "long-running", "prompt": "Build the complete billing subsystem: plans, subscriptions, invoices, payments, dunning, webhooks and an admin UI, with tests" },
   { "expected": "long-running", "prompt": "Work through the security audit report's 120 findings, fixing each one with a test and a commit, highest severity first" },
   { "expected": "long-running", "prompt": "Rewrite the whole mobile app from React Native to Flutter, screen by screen, until feature parity is reached" },
-  { "expected": "long-running", "prompt": "Decompose the monolith into six services along the documented domain boundaries, extracting one service at a time with a strangler proxy" }
+  { "expected": "long-running", "prompt": "Decompose the monolith into six services along the documented domain boundaries, extracting one service at a time with a strangler proxy" },
+  { "expected": "complex", "prompt": "Cut the p95 latency of GET /search from 900ms to under 200ms. Profile it, then fix the slowest queries, the N+1 loads in the result serializer and the missing cache in the ranking service, without changing the response." },
+  { "expected": "complex", "prompt": "Migrate the billing service from callbacks to async/await across src/billing, src/invoices and src/webhooks. Behavior must not change, and the existing integration tests are the check." },
+  { "expected": "complex", "prompt": "Bring the Docker image build down from 14 minutes to under 4. Rework the layer caching, split the monorepo install and parallelize the test stage in CI; the pipeline must still produce the same artifacts." },
+  { "expected": "complex", "prompt": "Move the sessions table from Postgres to Redis with no downtime. Write the dual-write layer, the backfill job and the cutover steps across the auth service and the API gateway." },
+  { "expected": "moderate", "prompt": "Add an index on orders(customer_id, created_at) in a new migration and update the query in src/orders/list.ts to use it. Done when the existing orders tests pass." },
+  { "expected": "moderate", "prompt": "Rename the column users.fullname to users.full_name: write the migration and update the three queries in src/users/repo.ts that use it." },
+  { "expected": "moderate", "prompt": "Memoize formatCurrency in src/utils/money.ts with a Map keyed by currency and amount, and add a test that a second call with the same arguments hits the cache." },
+  { "expected": "moderate", "prompt": "Replace moment with date-fns in src/utils/dates.ts. It has six exported functions, and dates.test.ts must still pass unchanged." }
 ]
