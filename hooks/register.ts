@@ -120,6 +120,8 @@ const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
 const CLEAR_AT = 25
 const COMPACT_AT = 60
 const CLEAR = 'Clear'
+/** Token counts as the row shows them: 48.2K, 1.2M. */
+const COMPACT_NUMBER = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
 const COMPACT = 'Compact'
 
 /**
@@ -570,7 +572,9 @@ export const register: Register = (on, options) => {
     const { Box, Button, Select, Text } = $.ui.resolve(e)
     const redraw = () => $.ui.invalidate('ui.render')
 
+    // The percent still picks the button; the row shows the tokens behind it, the input the last response was answered over.
     const percent = usage?.context.percent
+    const tokens = usage?.context.tokens
     const cost = usage?.cost?.usd
     // Drawn under the refine rows, so it holds its place as the pickers come and go above it, and at the right edge, apart from them.
     // The cost is the engine's own estimate, as /cost gives it, so the line says so.
@@ -581,7 +585,7 @@ export const register: Register = (on, options) => {
           h(
             Text,
             { dimColor: true },
-            `Session estimate: ${[cost === undefined ? '' : usd(cost), `${prompts} prompt${prompts === 1 ? '' : 's'}`, percent === undefined ? '' : `${percent}% context`]
+            `Session estimate: ${[cost === undefined ? '' : usd(cost), `${prompts} prompt${prompts === 1 ? '' : 's'}`, tokens === undefined ? '' : `${COMPACT_NUMBER.format(tokens)} tokens`]
               .filter(Boolean)
               .join(' · ')}`,
           ),

@@ -34,6 +34,8 @@ type Setup = {
   usageFails?: boolean
   /** The context percent, or one reading per `$.session.usage()` call in order; undefined leaves `context.percent` out, as on a fresh session. */
   pct?: number | number[]
+  /** The tokens the last response was answered over (`context.tokens`); undefined leaves them out, as on a fresh session. */
+  tokens?: number
   /** Every `$.session.turns()` call rejects; set it after the first prompt, which reads the turn count too. */
   turnsFails?: boolean
   /** Every slash command a test or the mod runs is refused, as a host past its limit would. */
@@ -92,7 +94,7 @@ function engine(on: On, s: Setup) {
     return {
       value: {
         startedAt: 0,
-        context: { window: 200_000, ...(percent === undefined ? {} : { percent }) },
+        context: { window: 200_000, ...(percent === undefined ? {} : { percent }), ...(s.tokens === undefined ? {} : { tokens: s.tokens }) },
         rateLimits: [],
         ...(usd === undefined ? {} : { cost: { usd } }),
       },
@@ -1943,15 +1945,17 @@ test('a Clear or Compact the session refuses says so in a toast', async ($, on) 
   expect(seen.toasts.length).toBe(1)
 })
 
-test('the status row shows cost, prompts and context on both surfaces, with or without the pickers', async ($, on) => {
-  const s: Setup = { turns: 3, surfaces: ['desktop'] }
+test('the status row shows cost, prompts and tokens in context on both surfaces, with or without the pickers', async ($, on) => {
+  const s: Setup = { turns: 3, surfaces: ['desktop'], tokens: 48_213 }
   engine(on, s)
   for (const [surface, draft] of [['terminal', ''], ['desktop', ''], ['terminal', LONG]] as const) {
     s.draft = draft
     s.usd = 0.4213
     s.pct = 30
     const ui = await band($, surface)
-    expect(await ui.find({ type: 'Text', text: /\$0\.42\b.*\b3 prompts\b.*\b30% context/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\$0\.42\b.*\b3 prompts\b.*\b48\.2K tokens\b/ })).toBeDefined()
+    // The token count replaces the context percent on the row.
+    expect(await ui.find({ type: 'Text', text: /%/ })).toBeUndefined()
     // The row sits at the band's right edge.
     expect((await ui.find({ key: 'status' }))?.props.justifyContent).toBe('flex-end')
   }
@@ -1961,7 +1965,7 @@ test('the status row leaves out what the session cannot read yet', async ($, on)
   engine(on, { turns: 1 })
   const ui = await band($)
   expect(await ui.find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /\$|context/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /\$|context|tokens/ })).toBeUndefined()
 })
 
 // After /clear the window is empty (or not read yet) while the prompt count can still include the cleared conversation's prompts.
