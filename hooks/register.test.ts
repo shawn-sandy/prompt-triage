@@ -121,6 +121,8 @@ function engine(on: On, s: Setup) {
     s.onCompact?.()
     return { messages: e.messages }
   })
+  // The engine's measurement beneath the plugin: it echoes which figures moved.
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
   // Counts band redraws and passes each one on, so a mounted band still redraws.
   let redraws = 0
   on('ui.invalidate', ($, e, next) => {
@@ -1863,6 +1865,19 @@ test('a main-loop turn redraws the band for the status row, and a subagent turn 
   expect(seen.redraws()).toBe(before)
   await complete($)
   expect(seen.redraws()).toBe(before + 1)
+})
+
+test('a measurement that moves the cost or context redraws the band, and one that moves only rate limits does not', async ($, on) => {
+  const seen = engine(on, { turns: 2 })
+  const measure = (changed: ('cost' | 'context' | 'rateLimits')[]) =>
+    $.session.measure({ context: { window: 200_000, percent: 20 }, rateLimits: [], cost: { usd: 0.5 }, changed })
+  const before = seen.redraws()
+  await measure(['rateLimits'])
+  expect(seen.redraws()).toBe(before)
+  await measure(['cost'])
+  expect(seen.redraws()).toBe(before + 1)
+  await measure(['context'])
+  expect(seen.redraws()).toBe(before + 2)
 })
 
 test('a typed /clear and a compaction each redraw the band, so the row drops the old figures', async ($, on) => {

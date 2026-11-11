@@ -263,8 +263,8 @@ button:
                     Session estimate: $0.42 · 3 prompts · 48% context   Clear
 ```
 
-The figures update at the end of each turn, after `/clear` and after a
-compaction. Below 25% context, or before a fresh conversation's first
+The figures update whenever the engine reports the cost or context moved,
+during a turn as well as after it, and after `/clear` and a compaction. Below 25% context, or before a fresh conversation's first
 response, the row draws no button, since nothing needs clearing. From 25% the
 button reads **Clear**, and from 60% it reads **Compact**. Pressing it opens a dialog that
 offers both, with the one the button named marked recommended: **Compact**
@@ -274,7 +274,7 @@ Closing the dialog runs nothing. The row shows whatever the `band` setting is.
 
 ## Hooks
 
-The mod registers thirteen hooks in `hooks/register.ts`. `prompt.submit` and
+The mod registers fourteen hooks in `hooks/register.ts`. `prompt.submit` and
 `command.run` are also the names of calls, so these hooks run whenever a
 prompt is submitted or `/model`, `/effort`, `/refine-prompt` or `/triage-stats` is run, whether you do it or
 other code (the app, another mod) does. The mod never makes either call
@@ -289,6 +289,7 @@ itself.
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. |
 | `turn.complete` | The end of each main-loop turn. Subagent turns pass through untouched. | Changes nothing in the turn. Redraws the band so the status row's figures update. After a rated first prompt, reads the session's cost, turn count and context percent and, for each that changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
 | `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Redraws the band so the status row drops the ended conversation's figures. Stops recording onto the ended session's entry, and after `/clear` marks the next prompt to be rated as a first prompt. |
+| `session.measure` | Each time the engine reports the session's cost, context fill or rate limits moved. | Changes nothing. Redraws the band when the cost or context moved, so the status row shows the new figures. |
 | `session.compact` | Each compaction of the main conversation: `/compact`, automatic, or the status row's **Compact**. | Changes nothing in the compaction. Redraws the band so the status row shows the new context figures. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given with the band's picks, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/triage-stats` only) | Each run of `/triage-stats`. | Reads the decision log from the store and prints the tally. Changes nothing. |
@@ -446,7 +447,7 @@ node scripts/eval-rating.mjs --runs 3
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the thirteen hooks and the `/refine-prompt` and `/triage-stats` commands. |
+| `hooks/register.ts` | All of the mod's logic: the fourteen hooks and the `/refine-prompt` and `/triage-stats` commands. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
 | `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`, once or averaged over `--runs N`. |

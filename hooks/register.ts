@@ -842,6 +842,13 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // The engine raises this when the figures $.session.usage() answers have moved: after each turn, and mid-turn as responses come in.
+  // turn.complete's redraw alone can read them before they move, which left the row on old figures. Rate limits are not on the row.
+  on('session.measure', ($, e, next) => {
+    if (e.changed.includes('cost') || e.changed.includes('context')) $.ui.invalidate('ui.render')
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   // A compaction, typed, automatic or the status row's own, changes the context the row shows.
   // A precompute pass compacts nothing yet, so it neither counts nor redraws.
   on('session.compact', async ($, e, next) => {
