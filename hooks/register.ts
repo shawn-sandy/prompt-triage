@@ -114,6 +114,34 @@ type Picks = { [K in Picker]: keyof (typeof PICKERS)[K]['options'] & string }
 // wrapped Run in line sat against the buttons above it (as reported); the mod API types draw a step as 0 rows down on the terminal.
 const ROW = { columnGap: 1, rowGap: 'sm', flexWrap: 'wrap' } as const
 const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
+// ponytail: fixed context percents. Below CLEAR_AT the window holds too little to need either, as right after /clear, so the row
+// draws no button; from it the button offers Clear, and from COMPACT_AT Compact, where a summary is worth keeping. The engine's own
+// auto-compact window is not read (only a usage breakdown carries it); tune these, or read it, if the button shows too early or late.
+const CLEAR_AT = 25
+const COMPACT_AT = 60
+const CLEAR = 'Clear'
+/** Token counts as the row shows them: 48.2K, 1.2M. */
+const COMPACT_NUMBER = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
+const COMPACT = 'Compact'
+
+/**
+ * The status row's button: asks whether to clear or compact, the one the context fill favours listed first and marked recommended,
+ * and runs that command. A dismissed dialog, or free text under "Other" that is not exactly an option's label, runs nothing: either
+ * command loses or rewrites the conversation. `$.ui.ask` answers a typed label the same as a picked one, so typing a label in full,
+ * "Clear (recommended)" included, runs it; a bare "Clear" when Clear is the recommended option is not a label and runs nothing.
+ */
+async function tidy($: EngineInterface, percent: number | undefined): Promise<void> {
+  const first = (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR
+  const options = [`${first} (recommended)`, first === COMPACT ? CLEAR : COMPACT]
+  const fill = percent === undefined ? '' : `Context is ${percent}% full. `
+  const answer = await $.ui
+    .ask(`${fill}Compact keeps a summary to go on with this task; Clear starts fresh for an unrelated one. Which?`, { header: 'Context', options })
+    .catch(() => undefined)
+  const i = answer === undefined ? -1 : options.indexOf(answer)
+  if (i < 0) return
+  const picked = i === 0 ? first : first === COMPACT ? CLEAR : COMPACT
+  await $.command.run({ command: picked.toLowerCase() })
+}
 
 /** The picks saved in the mod's store, each one that is missing or not an option at its default. */
 async function loadPicks($: EngineInterface): Promise<Picks> {
@@ -468,6 +496,9 @@ async function choose(
 }
 
 export const register: Register = (on, options) => {
+  let tidying = false
+  // User turns that compactions summarized away this conversation: turns() counts only those left in the transcript.
+  let compacted = 0
   // The model the person picked for the main loop; undefined leaves the session's own.
   let model: string | undefined
   // The least effort the main loop runs at, or with `exact` the effort it runs at; undefined leaves the session's own.
@@ -533,9 +564,56 @@ export const register: Register = (on, options) => {
     const refining = options.band !== 'never' && (result !== undefined || shown)
     // Run in is drawn on the desktop surface only: a band drawn there means the desktop app, where start_session exists, is attached.
     const desktop = e.surface === 'desktop'
-    if (!desktop && !refining) return next(e)
+    // The status row waits for the first prompt: before it there is nothing to cost, clear or compact.
+    // A compaction can leave no user turn in the transcript, so the summarized ones count too; /clear sets them back to zero.
+    const prompts = await $.session.turns().then(n => n + compacted, () => 0)
+    const usage = prompts > 0 ? await $.session.usage().catch(() => undefined) : undefined
+    if (!desktop && !refining && !prompts) return next(e)
     const { Box, Button, Select, Text } = $.ui.resolve(e)
     const redraw = () => $.ui.invalidate('ui.render')
+
+    // The percent still picks the button; the row shows the tokens behind it, the input the last response was answered over.
+    const percent = usage?.context.percent
+    const tokens = usage?.context.tokens
+    const cost = usage?.cost?.usd
+    // Drawn under the refine rows, so it holds its place as the pickers come and go above it, and at the right edge, apart from them.
+    // The cost is the engine's own estimate, as /cost gives it, so the line says so.
+    const status = prompts
+      ? h(
+          Box,
+          { key: 'status', ...ROW, justifyContent: 'flex-end' },
+          h(
+            Text,
+            { dimColor: true },
+            `Session estimate: ${[cost === undefined ? '' : usd(cost), `${prompts} prompt${prompts === 1 ? '' : 's'}`, tokens === undefined ? '' : `${COMPACT_NUMBER.format(tokens)} tokens`]
+              .filter(Boolean)
+              .join(' · ')}`,
+          ),
+          // An unknown fill (a fresh window, before its first response) counts as empty.
+          (percent ?? 0) < CLEAR_AT
+            ? null
+            : h(Button, {
+                key: 'tidy',
+                label: (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR,
+                // The dialog waits on the person and the command on an idle session, past the press's 10 s budget, so both run from a timer.
+                // A press while the dialog is open is dropped, so one answer cannot run the command twice.
+                onPress: () => {
+                  if (tidying) return
+                  tidying = true
+                  $.clock.after(
+                    0,
+                    () =>
+                      void tidy($, percent)
+                        .catch(() => $.ui.toast('Clear or compact failed'))
+                        .finally(() => {
+                          tidying = false
+                          redraw()
+                        }),
+                  )
+                },
+              }),
+        )
+      : null
 
     const runIn = desktop
       ? h(Select, {
@@ -600,8 +678,10 @@ export const register: Register = (on, options) => {
       },
     })
 
-    if (!refining) return h(Box, null, runIn, await next(e)) as RenderElement
-    if (!result) return h(Box, { flexDirection: 'column' }, h(Box, ROW, h(Text, { dimColor: true }, 'Refine'), ...pickers, runIn, refine), await next(e)) as RenderElement
+    if (!refining) return h(Box, { flexDirection: 'column' }, status, h(Box, null, runIn, await next(e))) as RenderElement
+    if (!result) {
+      return h(Box, { flexDirection: 'column' }, h(Box, ROW, h(Text, { dimColor: true }, 'Refine'), ...pickers, runIn, refine), status, await next(e)) as RenderElement
+    }
 
     const last = result
     const count = last.issues.length
@@ -640,7 +720,7 @@ export const register: Register = (on, options) => {
       runIn,
     )
     const list = last.expanded ? h(Box, { flexDirection: 'column' }, ...last.issues.map(issue => h(Text, null, `- ${issue}`))) : null
-    return h(Box, { flexDirection: 'column' }, row, list, await next(e)) as RenderElement
+    return h(Box, { flexDirection: 'column' }, row, list, status, await next(e)) as RenderElement
   })
 
   // The band redraws when its show rule's answer flips (the draft empties, crosses 40 characters, gains a line break, starts with /),
@@ -695,7 +775,8 @@ export const register: Register = (on, options) => {
     if (e.turnId) return next(e)
     // ponytail: a live /clear left the next prompt unrated, which fits the turn count still including the cleared conversation's
     // prompts; the flag rates it either way. If a later release resets the count on /clear, the flag is redundant, not wrong.
-    if (!cleared && (await $.session.turns()) > 0) return next(e)
+    // Prompts a compaction summarized away still count: the conversation goes on, so its next prompt is not a first one.
+    if (!cleared && (await $.session.turns()) + compacted > 0) return next(e)
     cleared = false
     // A new first prompt (as after /clear) ends the earlier decision's tracking, even when this one is not rated.
     tracked = undefined
@@ -731,6 +812,9 @@ export const register: Register = (on, options) => {
   // ponytail: one store write per turn whose figures changed; session.measure (pushed, folds bursts) is the move if that ever matters
   on('turn.complete', async ($, e, next) => {
     const t = tracked
+    // session.measure redraws only when the cost or context moved; a turn that moves neither (an API error, a host with no cost
+    // ledger) still changes the prompt count. Redraws fold, so a turn that also measures costs no extra paint.
+    if (!e.agentId) $.ui.invalidate('ui.render')
     if (e.agentId || !t) return next(e)
     // Read apart from the turn count, so a usage reading that fails leaves cost and ctx out without losing the turns.
     const usage = await $.session.usage().catch(() => undefined)
@@ -759,7 +843,29 @@ export const register: Register = (on, options) => {
   on('session.end', ($, e, next) => {
     tracked = undefined
     cleared = e.reason === 'clear'
+    compacted = 0
+    // The status row drops the ended conversation's figures, which no prompt edit redraws under band never.
+    $.ui.invalidate('ui.render')
     return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // The engine raises this after each main-thread turn whose figures moved, and when a rate-limit window moves. turn.complete's redraw
+  // can read $.session.usage() before the figures move, so this one shows them. Rate limits are not on the row.
+  on('session.measure', ($, e, next) => {
+    if (e.changed.includes('cost') || e.changed.includes('context')) $.ui.invalidate('ui.render')
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // A compaction, typed, automatic or the status row's own, changes the context the row shows.
+  // A precompute pass compacts nothing yet, so it neither counts nor redraws.
+  on('session.compact', async ($, e, next) => {
+    if (e.agentId || e.trigger === 'precompute') return next(e)
+    const before = await $.session.turns().catch(() => undefined)
+    const r = await next(e)
+    const after = await $.session.turns().catch(() => undefined)
+    if (before !== undefined && after !== undefined && after < before) compacted += before - after
+    $.ui.invalidate('ui.render')
+    return r
   }).catch(($, e, next) => next(e))
 
   // ponytail: rewrites each request rather than running /model, which cannot run while the prompt waits on this hook

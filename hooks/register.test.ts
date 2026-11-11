@@ -34,8 +34,14 @@ type Setup = {
   usageFails?: boolean
   /** The context percent, or one reading per `$.session.usage()` call in order; undefined leaves `context.percent` out, as on a fresh session. */
   pct?: number | number[]
+  /** The tokens the last response was answered over (`context.tokens`); undefined leaves them out, as on a fresh session. */
+  tokens?: number
   /** Every `$.session.turns()` call rejects; set it after the first prompt, which reads the turn count too. */
   turnsFails?: boolean
+  /** Every slash command a test or the mod runs is refused, as a host past its limit would. */
+  commandFails?: boolean
+  /** Runs as the engine compacts, as the transcript shrinking to its summary would. */
+  onCompact?: () => void
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -88,7 +94,7 @@ function engine(on: On, s: Setup) {
     return {
       value: {
         startedAt: 0,
-        context: { window: 200_000, ...(percent === undefined ? {} : { percent }) },
+        context: { window: 200_000, ...(percent === undefined ? {} : { percent }), ...(s.tokens === undefined ? {} : { tokens: s.tokens }) },
         rateLimits: [],
         ...(usd === undefined ? {} : { cost: { usd } }),
       },
@@ -112,6 +118,19 @@ function engine(on: On, s: Setup) {
     return { value: undefined }
   })
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  // The engine's compaction beneath the plugin: it keeps the transcript as given, which is all a redraw test needs.
+  on('session.compact', (_$, e) => {
+    s.onCompact?.()
+    return { messages: e.messages }
+  })
+  // The engine's measurement beneath the plugin: it echoes which figures moved.
+  on('session.measure', (_$, e) => ({ changed: e.changed }))
+  // Counts band redraws and passes each one on, so a mounted band still redraws.
+  let redraws = 0
+  on('ui.invalidate', ($, e, next) => {
+    redraws++
+    return next(e)
+  })
   // The mod rates with model.complete; a call here is counted so a test can show it never happens.
   on('model.classify', () => {
     classified++
@@ -147,7 +166,13 @@ function engine(on: On, s: Setup) {
     steps.push(e)
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null }
   })
-  on('command.run', () => ({ text: '' }))
+  // Every slash command that reaches the engine, by name, so a test sees the status row's Clear or Compact run.
+  const ran: string[] = []
+  on('command.run', (_$, e) => {
+    if (s.commandFails) throw new Error('command refused')
+    ran.push(e.command)
+    return { text: '' }
+  })
   on('model.complete', (_$, e) => {
     completes++
     // The rater and the reviewer share this call; each one's system prompt tells them apart.
@@ -177,7 +202,7 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { writes: () => writes, store, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
+  return { writes: () => writes, redraws: () => redraws, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, classified: () => classified }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -1817,3 +1842,184 @@ test('a model the mod cannot rank gets no tier wording', async ($, on) => {
   await submit($, 'Add a retry limit to the upload client')
   expect(seen.questions[0]).not.toMatch(/tier/i)
 })
+
+// The status row: the session's cost, prompts and context fill, and a Clear or Compact button that asks which and runs it.
+
+test('the status row waits for the first prompt', async ($, on) => {
+  const s: Setup = { turns: 0, usd: 0, pct: 0 }
+  engine(on, s)
+  for (const surface of SURFACES) expect(await (await band($, surface)).find({ key: 'status' })).toBeUndefined()
+  s.turns = 1
+  for (const surface of SURFACES) expect(await (await band($, surface)).find({ key: 'status' })).toBeDefined()
+})
+
+test('band: never still draws the status row on the terminal', { options: { band: 'never' } }, async ($, on) => {
+  engine(on, { turns: 2, usd: 0.1, pct: 40, draft: LONG })
+  const ui = await band($)
+  expect(await hasPickers(ui)).toBe(false)
+  expect(await ui.find({ key: 'tidy' })).toBeDefined()
+})
+
+// session.measure redraws only when the cost or context moved; a turn that moves neither (an API error, a host with no cost ledger)
+// still changes the prompt count, so the end of a main-loop turn redraws too.
+test('a main-loop turn redraws the band for the prompt count, and a subagent turn does not', async ($, on) => {
+  const seen = engine(on, { turns: 1 })
+  const before = seen.redraws()
+  await complete($, 'agent-1')
+  expect(seen.redraws()).toBe(before)
+  await complete($)
+  expect(seen.redraws()).toBe(before + 1)
+})
+
+test('a measurement that moves the cost or context redraws the band, and one that moves only rate limits does not', async ($, on) => {
+  const seen = engine(on, { turns: 2 })
+  const measure = (changed: ('cost' | 'context' | 'rateLimits')[]) =>
+    $.session.measure({ context: { window: 200_000, percent: 20 }, rateLimits: [], cost: { usd: 0.5 }, changed })
+  const before = seen.redraws()
+  await measure(['rateLimits'])
+  expect(seen.redraws()).toBe(before)
+  await measure(['cost'])
+  expect(seen.redraws()).toBe(before + 1)
+  await measure(['context'])
+  expect(seen.redraws()).toBe(before + 2)
+})
+
+test('a typed /clear and a compaction each redraw the band, so the row drops the old figures', async ($, on) => {
+  const seen = engine(on, { turns: 1 })
+  const before = seen.redraws()
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  expect(seen.redraws()).toBe(before + 1)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  expect(seen.redraws()).toBe(before + 2)
+})
+
+test('a typed label that is not one of the options runs nothing, even one naming the other command', async ($, on) => {
+  const seen = engine(on, { turns: 2, usd: 0.1, pct: 70, answer: 'Clear (recommended)' })
+  const ui = await band($)
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.ran).toEqual([])
+})
+
+test('a compaction keeps the prompt count, though the summarized transcript holds fewer user turns', async ($, on) => {
+  const s: Setup = { turns: 20, usd: 1.1, pct: 70, onCompact: () => (s.turns = 1) }
+  engine(on, s)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  expect(await (await band($)).find({ type: 'Text', text: /\b20 prompts\b/ })).toBeDefined()
+  s.turns = 2
+  expect(await (await band($)).find({ type: 'Text', text: /\b21 prompts\b/ })).toBeDefined()
+  // A /clear starts the count over.
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 1
+  expect(await (await band($)).find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
+})
+
+test('a compaction that leaves no user turn keeps the row and its prompt count', async ($, on) => {
+  const s: Setup = { turns: 20, usd: 1.1, pct: 70, onCompact: () => (s.turns = 0) }
+  engine(on, s)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  expect(await (await band($)).find({ type: 'Text', text: /\b20 prompts\b/ })).toBeDefined()
+})
+
+test('the prompt after a compaction that leaves no user turn is not rated as a first prompt', async ($, on) => {
+  const s: Setup = { turns: 5, onCompact: () => (s.turns = 0) }
+  const seen = engine(on, s)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  await submit($, 'Redesign the auth layer across three services')
+  expect(seen.ratings).toEqual([])
+  expect(seen.asked).toEqual([])
+})
+
+test('a precompute pass, which compacts nothing yet, does not redraw the band', async ($, on) => {
+  const seen = engine(on, { turns: 1 })
+  const before = seen.redraws()
+  await $.session.compact({ trigger: 'precompute', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
+  expect(seen.redraws()).toBe(before)
+})
+
+test('a Clear or Compact the session refuses says so in a toast', async ($, on) => {
+  const seen = engine(on, { turns: 2, pct: 40, answer: 'Clear (recommended)', commandFails: true })
+  const ui = await band($)
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.toasts.length).toBe(1)
+})
+
+test('the status row shows cost, prompts and tokens in context on both surfaces, with or without the pickers', async ($, on) => {
+  const s: Setup = { turns: 3, surfaces: ['desktop'], tokens: 48_213 }
+  engine(on, s)
+  for (const [surface, draft] of [['terminal', ''], ['desktop', ''], ['terminal', LONG]] as const) {
+    s.draft = draft
+    s.usd = 0.4213
+    s.pct = 30
+    const ui = await band($, surface)
+    expect(await ui.find({ type: 'Text', text: /\$0\.42\b.*\b3 prompts\b.*\b48\.2K tokens\b/ })).toBeDefined()
+    // The token count replaces the context percent on the row.
+    expect(await ui.find({ type: 'Text', text: /%/ })).toBeUndefined()
+    // The row sits at the band's right edge.
+    expect((await ui.find({ key: 'status' }))?.props.justifyContent).toBe('flex-end')
+  }
+})
+
+test('the status row leaves out what the session cannot read yet', async ($, on) => {
+  engine(on, { turns: 1 })
+  const ui = await band($)
+  expect(await ui.find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\$|context|tokens/ })).toBeUndefined()
+})
+
+// After /clear the window is empty (or not read yet) while the prompt count can still include the cleared conversation's prompts.
+for (const pct of [undefined, 0, 24] as const) {
+  test(`a context fill of ${pct ?? 'unknown'} needs no clear, so the row draws no button`, async ($, on) => {
+    engine(on, { turns: 3, usd: 0.2, pct })
+    const ui = await band($)
+    expect(await ui.find({ key: 'status' })).toBeDefined()
+    expect(await ui.find({ key: 'tidy' })).toBeUndefined()
+  })
+}
+
+test('from 25% context the button reads Clear', async ($, on) => {
+  engine(on, { turns: 3, usd: 0.2, pct: 25 })
+  expect((await (await band($)).find({ key: 'tidy' }))?.props.label).toBe('Clear')
+})
+
+test('below the compact threshold the button reads Clear and recommends it; picking it runs /clear', async ($, on) => {
+  const seen = engine(on, { turns: 2, usd: 0.1, pct: 59, answer: 'Clear (recommended)' })
+  const ui = await band($)
+  expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Clear')
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.asked[0]?.[0]).toMatch(/^Clear\b.*recommended/)
+  expect(seen.ran).toEqual(['clear'])
+})
+
+test('pressing the button twice before the dialog closes asks and runs once', async ($, on) => {
+  const seen = engine(on, { turns: 2, usd: 0.1, pct: 59, answer: ['Clear (recommended)', 'Clear (recommended)'] })
+  const ui = await band($)
+  await ui.press({ key: 'tidy' })
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.asked).toHaveLength(1)
+  expect(seen.ran).toEqual(['clear'])
+})
+
+test('at the compact threshold the button reads Compact and recommends it; picking it runs /compact', async ($, on) => {
+  const seen = engine(on, { turns: 2, usd: 0.1, pct: 60, answer: 'Compact (recommended)' })
+  const ui = await band($)
+  expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Compact')
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.asked[0]?.[0]).toMatch(/^Compact\b.*recommended/)
+  expect(seen.asked[0]?.[1]).toMatch(/^Clear\b/)
+  expect(seen.ran).toEqual(['compact'])
+})
+
+for (const [answer, ran] of [['Compact', ['compact']], [undefined, []], ['compact it please', []]] as const) {
+  test(`answering ${answer ?? 'nothing'} under a Clear recommendation runs ${ran[0] ?? 'nothing'}`, async ($, on) => {
+    const seen = engine(on, { turns: 2, usd: 0.1, pct: 40, answer })
+    const ui = await band($)
+    await ui.press({ key: 'tidy' })
+    await settle()
+    expect(seen.ran).toEqual(ran)
+  })
+}
