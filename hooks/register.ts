@@ -718,9 +718,9 @@ export const register: Register = (on, options) => {
       },
     })
 
-    if (!refining) return h(Box, { flexDirection: 'column' }, status, h(Box, null, runIn, await next(e))) as RenderElement
+    if (!refining) return h(Box, { flexDirection: 'column' }, h(Box, null, runIn, await next(e)), status) as RenderElement
     if (!result) {
-      return h(Box, { flexDirection: 'column' }, h(Box, ROW, h(Text, { dimColor: true }, 'Refine'), ...pickers, runIn, refine), status, await next(e)) as RenderElement
+      return h(Box, { flexDirection: 'column' }, h(Box, ROW, h(Text, { dimColor: true }, 'Refine'), ...pickers, runIn, refine), await next(e), status) as RenderElement
     }
 
     const last = result
@@ -760,7 +760,7 @@ export const register: Register = (on, options) => {
       runIn,
     )
     const list = last.expanded ? h(Box, { flexDirection: 'column' }, ...last.issues.map(issue => h(Text, null, `- ${issue}`))) : null
-    return h(Box, { flexDirection: 'column' }, row, list, status, await next(e)) as RenderElement
+    return h(Box, { flexDirection: 'column' }, row, list, await next(e), status) as RenderElement
   })
 
   // The band redraws when its show rule's answer flips (the draft empties, crosses 40 characters, gains a line break, starts with /),
