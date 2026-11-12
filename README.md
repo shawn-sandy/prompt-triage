@@ -296,18 +296,18 @@ prompt, so the model dialog does not offer **Refine prompt** again for it.
 
 After the first prompt, the bottom row of the band shows a **Session
 estimate** at its right edge: what the session has cost, how many prompts it
-has had and how many tokens are in the context window, with a **Clear** or **Compact**
+has had and how many tokens are in the context window, with a **Manage context**
 button:
 
 ```text
-                    Session estimate: $0.42 · 3 prompts · 48.2K tokens   Clear
+                    Session estimate: $0.42 · 3 prompts · 48.2K tokens   Manage context
 ```
 
 The figures update whenever the engine reports the cost or context moved,
 after each turn, and after `/clear` and a compaction. Below 25% context, or before a fresh conversation's first
 response, the row draws no button, since nothing needs clearing. From 25% the
-button reads **Clear**, and from 60% it reads **Compact**. Pressing it opens a dialog that
-offers both, with the one the button named marked recommended: **Compact**
+button appears. Pressing it opens a dialog that offers both, recommending **Clear** below
+60% context and **Compact** from 60%: **Compact**
 keeps a summary to go on with the task, and **Clear** starts fresh for an
 unrelated one. The choice runs `/compact` or `/clear` once the session is idle.
 Closing the dialog runs nothing. The row shows whatever the `band` setting is.
@@ -324,7 +324,7 @@ it never makes the `prompt.submit` call, and it runs no other command.
 | Hook | When it acts | What it may change |
 | --- | --- | --- |
 | `session.start` | Each session start. | Registers the `/refine-prompt` and `/triage-stats` commands. |
-| `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, unless a survey holds the band. | Draws the refine band (Goal, Workflow and Scope pickers and **Refine**, or the result row after a refine) when the draft meets the `band` setting, after the first prompt the status row (cost, prompts, tokens in context and **Clear** or **Compact**, which runs that command when you pick it in its dialog), and in the desktop app the **Run in** picker, above whatever else draws the band. **Refine** puts its rewrite in the prompt box and **Restore original** puts the draft back; nothing else changes until you send. |
+| `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, unless a survey holds the band. | Draws the refine band (Goal, Workflow and Scope pickers and **Refine**, or the result row after a refine) when the draft meets the `band` setting, after the first prompt the status row (cost, prompts, tokens in context and **Manage context**, which runs `/clear` or `/compact` when you pick one in its dialog), and in the desktop app the **Run in** picker, above whatever else draws the band. **Refine** puts its rewrite in the prompt box and **Restore original** puts the draft back; nothing else changes until you send. |
 | `prompt.edit`, `prompt.change` | Each change to the prompt box. | Change nothing. Redraw the band when the draft starts or stops meeting the `band` setting. |
 | `prompt.submit` | On any prompt you send (typed, including over a running turn, or through Remote Control) that is not a slash command or a meta prompt while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`, when no turn is running. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. Remembers the effort the request ran at, for the decision log. |

@@ -1989,15 +1989,15 @@ for (const pct of [undefined, 0, 24] as const) {
   })
 }
 
-test('from 25% context the button reads Clear', async ($, on) => {
+test('from 25% context the button reads Manage context', async ($, on) => {
   engine(on, { turns: 3, usd: 0.2, pct: 25 })
-  expect((await (await band($)).find({ key: 'tidy' }))?.props.label).toBe('Clear')
+  expect((await (await band($)).find({ key: 'tidy' }))?.props.label).toBe('Manage context')
 })
 
-test('below the compact threshold the button reads Clear and recommends it; picking it runs /clear', async ($, on) => {
+test('below the compact threshold the button reads Manage context and the dialog recommends Clear; picking it runs /clear', async ($, on) => {
   const seen = engine(on, { turns: 2, usd: 0.1, pct: 59, answer: 'Clear (recommended)' })
   const ui = await band($)
-  expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Clear')
+  expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Manage context')
   await ui.press({ key: 'tidy' })
   await settle()
   expect(seen.asked[0]?.[0]).toMatch(/^Clear\b.*recommended/)
@@ -2014,10 +2014,10 @@ test('pressing the button twice before the dialog closes asks and runs once', as
   expect(seen.ran).toEqual(['clear'])
 })
 
-test('at the compact threshold the button reads Compact and recommends it; picking it runs /compact', async ($, on) => {
+test('at the compact threshold the button still reads Manage context and the dialog recommends Compact; picking it runs /compact', async ($, on) => {
   const seen = engine(on, { turns: 2, usd: 0.1, pct: 60, answer: 'Compact (recommended)' })
   const ui = await band($)
-  expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Compact')
+  expect((await ui.find({ key: 'tidy' }))?.props.label).toBe('Manage context')
   await ui.press({ key: 'tidy' })
   await settle()
   expect(seen.asked[0]?.[0]).toMatch(/^Compact\b.*recommended/)
