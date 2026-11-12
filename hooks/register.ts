@@ -630,7 +630,7 @@ export const register: Register = (on, options) => {
           h(
             Text,
             { dimColor: true },
-            `Session estimate: ${[cost === undefined ? '' : usd(cost), `${prompts} prompt${prompts === 1 ? '' : 's'}`, tokens === undefined ? '' : `${COMPACT_NUMBER.format(tokens)} tokens`]
+            `Session estimate: ${[cost === undefined ? '' : usd(cost), `${prompts} prompt${prompts === 1 ? '' : 's'}`, tokens === undefined ? '' : `${COMPACT_NUMBER.format(tokens)} tokens`, percent === undefined ? '' : `${percent}% context`]
               .filter(Boolean)
               .join(' · ')}`,
           ),

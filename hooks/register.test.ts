@@ -2071,9 +2071,8 @@ test('the status row shows cost, prompts and tokens in context on both surfaces,
     s.usd = 0.4213
     s.pct = 30
     const ui = await band($, surface)
-    expect(await ui.find({ type: 'Text', text: /\$0\.42\b.*\b3 prompts\b.*\b48\.2K tokens\b/ })).toBeDefined()
-    // The token count replaces the context percent on the row.
-    expect(await ui.find({ type: 'Text', text: /%/ })).toBeUndefined()
+    // The context percent, which picks the Manage context button, follows the token count.
+    expect(await ui.find({ type: 'Text', text: /\$0\.42\b.*\b3 prompts\b.*\b48\.2K tokens · 30% context\b/ })).toBeDefined()
     // The row is inside the Triage section, left-aligned with its controls.
     expect(keysIn((await ui.find({ key: 'triage' })) as Node | undefined)).toContain('status')
     expect((await ui.find({ key: 'status' }))?.props.justifyContent).toBeUndefined()
