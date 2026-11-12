@@ -42,6 +42,8 @@ type Setup = {
   commandFails?: boolean
   /** Runs as the engine compacts, as the transcript shrinking to its summary would. */
   onCompact?: () => void
+  /** A prompt text the session refuses to enter, as another plugin's drop would. */
+  refuse?: string
 }
 
 const USAGE = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
@@ -162,6 +164,7 @@ function engine(on: On, s: Setup) {
     return { value: undefined }
   })
   on('prompt.submit', (_$, e) => {
+    if (e.text === s.refuse) return { drop: 'refused' }
     submitted.push(e)
     return { text: e.text, context: e.context }
   })
@@ -1946,7 +1949,7 @@ test('the status row waits for the first prompt', async ($, on) => {
   const s: Setup = { turns: 0, usd: 0, pct: 0 }
   engine(on, s)
   for (const surface of SURFACES) expect(await (await band($, surface)).find({ key: 'status' })).toBeUndefined()
-  s.turns = 1
+  await submit($, 'Fix the login bug')
   for (const surface of SURFACES) expect(await (await band($, surface)).find({ key: 'status' })).toBeDefined()
 })
 
@@ -2001,14 +2004,32 @@ test('a typed label that is not one of the options runs nothing, even one naming
 test('a compaction keeps the prompt count, though the summarized transcript holds fewer user turns', async ($, on) => {
   const s: Setup = { turns: 20, usd: 1.1, pct: 70, onCompact: () => (s.turns = 1) }
   engine(on, s)
+  expect(await (await band($)).find({ type: 'Text', text: /\b20 prompts\b/ })).toBeDefined()
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'Summary so far', toolUses: [] }] })
   expect(await (await band($)).find({ type: 'Text', text: /\b20 prompts\b/ })).toBeDefined()
-  s.turns = 2
+  // The transcript's own count moving (a summary turn, a command's record) changes nothing; a sent prompt does.
+  s.turns = 4
+  expect(await (await band($)).find({ type: 'Text', text: /\b20 prompts\b/ })).toBeDefined()
+  await submit($, 'Now add the tests')
   expect(await (await band($)).find({ type: 'Text', text: /\b21 prompts\b/ })).toBeDefined()
-  // A /clear starts the count over.
+  // A /clear starts the count over, though its own command record is a user turn of the new transcript.
   await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
   s.turns = 1
+  expect(await (await band($)).find({ key: 'status' })).toBeUndefined()
+  await submit($, 'Start on the billing page')
   expect(await (await band($)).find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
+})
+
+// The transcript records a slash command as a user turn, so /compact read as one more prompt and /clear as the first.
+test('the row counts prompts sent, not slash commands, hidden prompts or dropped ones', async ($, on) => {
+  const s: Setup = { turns: 2, refuse: 'Dropped before it entered' }
+  engine(on, s)
+  expect(await (await band($)).find({ type: 'Text', text: /\b2 prompts\b/ })).toBeDefined()
+  await $.prompt.submit({ text: '/compact', command: { name: 'compact', args: '' }, wait: false, origin: { kind: 'composer' } })
+  await $.prompt.submit({ text: 'reminder', isMeta: true, wait: false, origin: { kind: 'composer' } })
+  await submit($, 'Dropped before it entered')
+  s.turns = 5
+  expect(await (await band($)).find({ type: 'Text', text: /\b2 prompts\b/ })).toBeDefined()
 })
 
 test('a compaction that leaves no user turn keeps the row and its prompt count', async ($, on) => {

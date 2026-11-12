@@ -536,6 +536,9 @@ export const register: Register = (on, options) => {
   let tidying = false
   // User turns that compactions summarized away this conversation: turns() counts only those left in the transcript.
   let compacted = 0
+  // Prompts the person sent this conversation, for the status row: the transcript's user turns also hold each slash command's record.
+  // ponytail: seeded once from turns() (startup, a reload, /resume), so a resumed conversation's earlier commands still count there
+  let sent: number | undefined
   // The model the person picked for the main loop; undefined leaves the session's own.
   let model: string | undefined
   // The least effort the main loop runs at, or with `exact` the effort it runs at; undefined leaves the session's own.
@@ -604,8 +607,7 @@ export const register: Register = (on, options) => {
     // Run in is drawn on the desktop surface only: a band drawn there means the desktop app, where start_session exists, is attached.
     const desktop = e.surface === 'desktop'
     // The status row waits for the first prompt: before it there is nothing to cost, clear or compact.
-    // A compaction can leave no user turn in the transcript, so the summarized ones count too; /clear sets them back to zero.
-    const prompts = await $.session.turns().then(n => n + compacted, () => 0)
+    const prompts = (sent ??= await $.session.turns().then(n => n + compacted, () => 0))
     const usage = prompts > 0 ? await $.session.usage().catch(() => undefined) : undefined
     if (!desktop && !refining && !prompts) return next(e)
     const { Box, Button, Select, Text } = $.ui.resolve(e)
@@ -811,7 +813,15 @@ export const register: Register = (on, options) => {
     return { text: reviewed ? asMarkdown(reviewed) : 'The review failed; nothing was changed.' }
   }).catch(() => ({ text: 'The review failed; nothing was changed.' }))
 
-  on('prompt.submit', async ($, e, next) => {
+  on('prompt.submit', async ($, e, pass) => {
+    // A prompt that entered the session counts on the status row; a slash command, a hidden prompt or a dropped one does not.
+    const counts = !e.command && !e.isMeta
+    if (counts) sent ??= await $.session.turns().then(n => n + compacted, () => 0)
+    const next = async (x: PromptSubmitInput) => {
+      const r = await pass(x)
+      if (counts && sent !== undefined && !('drop' in r)) sent++
+      return r
+    }
     // A send closes the band's result row, and ends any band review running.
     sends++
     if (result) {
@@ -908,6 +918,8 @@ export const register: Register = (on, options) => {
     ran = undefined
     cleared = e.reason === 'clear'
     compacted = 0
+    // /clear starts an empty conversation; /resume and /branch move to one whose count is read afresh.
+    sent = cleared ? 0 : undefined
     // The status row drops the ended conversation's figures, which no prompt edit redraws under band never.
     $.ui.invalidate('ui.render')
     return next(e)

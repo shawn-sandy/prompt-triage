@@ -301,7 +301,9 @@ prompt, so the model dialog does not offer **Refine prompt** again for it.
 
 After the first prompt, the bottom row of the Triage section shows a **Session
 estimate**: what the session has cost, how many prompts it has had and how
-many tokens are in the context window, with a **Manage context** button:
+many tokens are in the context window, with a **Manage context** button. Slash
+commands such as `/compact` do not count as prompts, a compaction keeps the
+count, and `/clear` starts it over:
 
 ```text
 Session estimate: $0.42 · 3 prompts · 48.2K tokens   Manage context
