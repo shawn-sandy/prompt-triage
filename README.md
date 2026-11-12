@@ -428,8 +428,9 @@ request at all.
   kept by counting sends. A read taken mid-conversation includes the slash
   commands typed before it, which the transcript records as user turns, so the
   count can run high there until a `/clear`. A read that fails is tried again on
-  the next draw or prompt, and a read still running when the conversation ends
-  is dropped.
+  the next draw or prompt, and a prompt sent while the count is unread is not
+  rated as a first prompt. A read still running when the conversation ends is
+  dropped.
 - Sessions differ in task, so the cost table and the prompts and context table
   show which choices went with cheaper, shorter or fuller sessions, not that a
   choice made them so. `/triage-stats` says so under the tables.

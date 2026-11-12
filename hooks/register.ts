@@ -944,7 +944,8 @@ export const register: Register = (on, options) => {
       result = undefined
       $.ui.invalidate('ui.render')
     }
-    if (e.command || e.isMeta) return next(e)
+    // A slash command, a hidden prompt or a delivery (a schedule, a task, a plugin's own message) is not the person's prompt to rate.
+    if (!isSent(e)) return next(e)
     // An armed Run in pick goes before the running-turn and first-prompt checks, so it hands off any prompt, including one typed
     // over a running turn (the desktop band stays up then); the new session rates it there. Only the person's own prompt takes it:
     // a notification or a peer's message, which can arrive at any time, leaves the pick armed.
@@ -959,7 +960,8 @@ export const register: Register = (on, options) => {
     // prompts; the flag rates it either way, and the prompt count is already zero then, so the flag is redundant, not wrong.
     // The prompt count, not the transcript's turns: a slash command typed first is a user turn there. A compaction's summarized prompts
     // are in it too, since the conversation goes on and its next prompt is not a first one.
-    if (!cleared && (sent ?? 0) > 0) return next(e)
+    // A count that could not be read skips the rating, as a failed read did before: a later prompt is not taken for a first one.
+    if (!cleared && (sent === undefined || sent > 0)) return next(e)
     cleared = false
     // A new first prompt (as after /clear) ends the earlier decision's tracking, even when this one is not rated.
     tracked = undefined

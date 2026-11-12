@@ -2150,6 +2150,25 @@ test('a count read still running when the conversation ends is not kept for the 
   expect(await (await band($)).find({ type: 'Text', text: /\b2 prompts\b/ })).toBeDefined()
 })
 
+// A delivery is not the person's first prompt, so it opens no model dialog and logs no decision.
+test('a delivery before the first prompt is not rated, and the first prompt after it is', async ($, on) => {
+  const seen = engine(on, { turns: 0 })
+  const delivered: PromptOrigin[] = [{ kind: 'scheduled-trigger' }, { kind: 'task-notification' }, { kind: 'plugin', name: 'other' }]
+  for (const origin of delivered) await $.prompt.submit({ text: 'Redesign the auth layer across three services', wait: false, origin })
+  expect(seen.ratings).toEqual([])
+  expect(seen.asked).toEqual([])
+  await submit($, 'Redesign the auth layer across three services')
+  expect(seen.ratings).toHaveLength(1)
+})
+
+// On main a count that could not be read skipped the rating; reading it as zero would rate a later prompt as a first one.
+test('a prompt sent while the prompt count cannot be read is not rated as a first prompt', async ($, on) => {
+  const seen = engine(on, { turns: 4, turnsFails: true })
+  await submit($, 'Redesign the auth layer across three services')
+  expect(seen.ratings).toEqual([])
+  expect(seen.asked).toEqual([])
+})
+
 // The transcript records a slash command as a user turn, so /compact read as one more prompt and /clear as the first.
 test('the row counts prompts sent, not slash commands, hidden prompts or dropped ones', async ($, on) => {
   const s: Setup = { turns: 2, refuse: 'Dropped before it entered' }
