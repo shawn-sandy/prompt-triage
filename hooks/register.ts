@@ -496,7 +496,7 @@ function tally(list: Decision[], since?: string): string {
   })
   if (usage.length) {
     tables.push(
-      `Average turns, and average share of the context window used, at the end of a session's latest turn:\n\n| Rating | Average turns | Sessions | Average context used | Sessions |\n| --- | --- | --- | --- | --- |\n${usage.join('\n')}`,
+      `Average prompts sent, and average share of the context window used, at the end of a session's latest turn:\n\n| Rating | Average prompts | Sessions | Average context used | Sessions |\n| --- | --- | --- | --- | --- |\n${usage.join('\n')}`,
     )
   }
   return tables.length ? `${counts}\n\n${tables.join('\n\n')}\n\nSessions differ in task, so this shows association, not cause.` : counts
@@ -582,6 +582,25 @@ async function choose(
  * Never rejects. It also holds each slash command's record, so the mod reads it once and counts sends from there.
  * Callers assign with `sent ??= n` after the await, so a count another hook set while it read (a send, a /clear) is kept.
  */
+/** Origins of deliveries the person did not send: a background task, a schedule, another session or agent, a follow-up the app queued. */
+const DELIVERED: ReadonlySet<string> = new Set([
+  'task-notification',
+  'scheduled-trigger',
+  'peer',
+  'peer-send-message',
+  'projects-relay',
+  'coordinator',
+  'observer',
+  'observer-activity',
+  'auto-continuation',
+])
+
+/**
+ * Whether a submission is a prompt the person sent, for the status row and the first-prompt check: not a slash command, a hidden
+ * prompt, a delivery, or a plugin's message in its own name. Their own words from any surface (a phone, Slack, the desktop) count.
+ */
+const isSent = (e: PromptSubmitInput) => !e.command && !e.isMeta && !DELIVERED.has(e.origin.kind) && !(e.origin.kind === 'plugin' && !e.origin.asUser)
+
 const readPrompts = ($: EngineInterface, compacted: number): Promise<number> =>
   $.session.turns().then(
     n => n + compacted,
@@ -873,7 +892,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'triage-stats',
       description:
-        'Show how often each rating led to a model switch, and what those sessions cost, how many turns they ran and how full their context got',
+        'Show how often each rating led to a model switch, and what those sessions cost, how many prompts they had and how full their context got',
       argumentHint: '[since YYYY-MM-DD]',
     })
     return next(e)
@@ -895,8 +914,8 @@ export const register: Register = (on, options) => {
   }).catch(() => ({ text: 'The review failed; nothing was changed.' }))
 
   on('prompt.submit', async ($, e, pass) => {
-    // A prompt that entered the session counts on the status row; a slash command, a hidden prompt or a dropped one does not.
-    const counts = !e.command && !e.isMeta
+    // A prompt the person sent that entered the session counts on the status row; a dropped one does not.
+    const counts = isSent(e)
     if (counts && sent === undefined) {
       const n = await readPrompts($, compacted)
       sent ??= n
@@ -970,7 +989,7 @@ export const register: Register = (on, options) => {
     // A failure here never holds up the prompt. One that failed before `next` ran sends it here, so it is counted here too.
     if (next.called) return next(e)
     const r = await next(e)
-    if (!e.command && !e.isMeta && sent !== undefined && r.drop === undefined) {
+    if (isSent(e) && sent !== undefined && r.drop === undefined) {
       sent++
       $.ui.invalidate('ui.render')
     }

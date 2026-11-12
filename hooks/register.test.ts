@@ -1,6 +1,15 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { AgentSpawnInput, ModelCompleteInput, On, PromptSubmitInput, RenderElement, RenderSurface, TurnStepInput } from 'claude-code'
+import type {
+  AgentSpawnInput,
+  ModelCompleteInput,
+  On,
+  PromptOrigin,
+  PromptSubmitInput,
+  RenderElement,
+  RenderSurface,
+  TurnStepInput,
+} from 'claude-code'
 
 type Setup = {
   turns?: number
@@ -2102,8 +2111,20 @@ test('the row counts prompts sent, not slash commands, hidden prompts or dropped
   await $.prompt.submit({ text: '/compact', command: { name: 'compact', args: '' }, wait: false, origin: { kind: 'composer' } })
   await $.prompt.submit({ text: 'reminder', isMeta: true, wait: false, origin: { kind: 'composer' } })
   await submit($, 'Dropped before it entered')
+  // Deliveries the person did not send: a background task, another session, a schedule, a plugin's own message.
+  const delivered: PromptOrigin[] = [
+    { kind: 'task-notification' },
+    { kind: 'peer' },
+    { kind: 'scheduled-trigger' },
+    { kind: 'plugin', name: 'other' },
+  ]
+  for (const origin of delivered) await $.prompt.submit({ text: 'Delivered', wait: false, origin })
   s.turns = 5
   expect(await (await band($)).find({ type: 'Text', text: /\b2 prompts\b/ })).toBeDefined()
+  // The person's own prompt counts from any surface: a phone, Slack, or a plugin sending their words.
+  const person: PromptOrigin[] = [{ kind: 'bridge' }, { kind: 'slack-ping' }, { kind: 'plugin', name: 'other', asUser: true }]
+  for (const origin of person) await $.prompt.submit({ text: 'From the person', wait: false, origin })
+  expect(await (await band($)).find({ type: 'Text', text: /\b5 prompts\b/ })).toBeDefined()
 })
 
 // The transcript holds a slash command's record as a user turn, so a /model typed first made the first prompt look like a later one.

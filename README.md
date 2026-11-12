@@ -175,7 +175,7 @@ conversation that follows a `/clear` does not inherit the cleared one's prompts.
 as a whole percent, at the end of the latest turn; it is left out until the
 session has had its first response, and it can fall after a compaction. `ctx` is
 left out when it cannot be read. When at least one entry has either,
-`/triage-stats` adds a table with one row per rating: the average turns, the
+`/triage-stats` adds a table with one row per rating: the average prompts sent, the
 average context percent, and beside each the number of sessions that had that
 figure. An entry missing one figure is left out of that average only, and a
 rating with neither figure gets no row.
@@ -301,8 +301,10 @@ prompt, so the model dialog does not offer **Refine prompt** again for it.
 After the first prompt, the bottom row of the Triage section shows a **Session
 estimate**: what the session has cost, how many prompts it has had and how
 many tokens are in the context window and what share of it they fill, with a
-**Manage context** button that the share decides. Slash
-commands such as `/compact` do not count as prompts, a compaction keeps the
+**Manage context** button that the share decides. Only prompts you send count,
+from any surface: slash commands such as `/compact` do not, nor do messages
+delivered to the session (a background task's notification, a scheduled
+prompt, another session's message). A compaction keeps the
 count, and `/clear` starts it over:
 
 ```text
@@ -332,7 +334,7 @@ it never makes the `prompt.submit` call, and it runs no other command.
 | `session.start` | Each session start. | Registers the `/refine-prompt` and `/triage-stats` commands, and reads the conversation's prompt count once, before any slash command you type adds a user turn to the transcript. |
 | `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, unless a survey holds the band. | Draws the bordered Triage section: the refine controls (Goal, Workflow and Scope pickers and **Refine**, or the result row after a refine) when the draft meets the `band` setting, after the first prompt the status row (cost, prompts, tokens in context and **Manage context**, which runs `/clear` or `/compact` when you pick one in its dialog), and in the desktop app the **Run in** picker. The section sits above whatever else draws the band. **Refine** puts its rewrite in the prompt box and **Restore original** puts the draft back; nothing else changes until you send. |
 | `prompt.edit`, `prompt.change` | Each change to the prompt box. | Change nothing. Redraw the band when the draft starts or stops meeting the `band` setting. |
-| `prompt.submit` | On any prompt you send (typed, including over a running turn, or through Remote Control) that is not a slash command or a meta prompt while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`, when no turn is running. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. Counts each prompt that enters toward the status row's prompt count and the first-prompt check, and redraws the band so the row shows it at once; a slash command, a meta prompt and a dropped prompt are not counted. If the hook fails, the prompt is sent unchanged and still counted. |
+| `prompt.submit` | On any prompt you send (typed, including over a running turn, or through Remote Control) that is not a slash command or a meta prompt while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`, when no turn is running. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. Counts each prompt that enters toward the status row's prompt count and the first-prompt check, and redraws the band so the row shows it at once; a slash command, a meta prompt, a dropped prompt and a delivery you did not send (a task notification, a scheduled prompt, another session's or a plugin's own message) are not counted. If the hook fails, the prompt is sent unchanged and still counted. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. Remembers the effort the request ran at, for the decision log. |
 | `agent.spawn` | Each subagent about to start. | After a switch up to `opus` or `fable`, sets the built-in Explore subagent's model to `haiku` when its request names none. A resumed run, a teammate, another agent type and an Explore agent from a plugin or from you pass through untouched. |
 | `turn.complete` | The end of each main-loop turn. Subagent turns pass through untouched. | Changes nothing in the turn. Redraws the band so the status row shows the prompt a send added even when the cost and context did not move. After a rated first prompt, reads the session's cost, context percent and effort, and works out the prompts sent since the decision, and, for each that changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
