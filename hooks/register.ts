@@ -594,8 +594,8 @@ export const register: Register = (on, options) => {
     return { entry: { rating, from, to: onModel(current), chose }, status }
   }
 
-  // The refine band: Goal, Workflow and Scope pickers and Refine (or the result row after one), and on the desktop the Run in picker,
-  // drawn above whatever else draws the band; a survey holds the band alone.
+  // The Triage section of the band: Goal, Workflow and Scope pickers and Refine (or the result row after one), on the desktop the Run in picker,
+  // and after the first prompt the status row, in one bordered box above whatever else draws the band; a survey holds the band alone.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (e.surface !== 'terminal' && e.surface !== 'desktop')) return next(e)
     const current = await (picks ??= loadPicks($))
@@ -615,12 +615,16 @@ export const register: Register = (on, options) => {
     const percent = usage?.context.percent
     const tokens = usage?.context.tokens
     const cost = usage?.cost?.usd
-    // Drawn under the refine rows, so it holds its place as the pickers come and go above it, and at the right edge, apart from them.
+    // The section's name. The first row drawn carries it: the controls row where one shows (the desktop, or a refine band), else the status row.
+    const label = h(Text, { key: 'label', dimColor: true, bold: true }, 'Triage')
+    const controls = desktop || refining
+    // Drawn under the controls row, so it holds its place as the pickers come and go above it.
     // The cost is the engine's own estimate, as /cost gives it, so the line says so.
     const status = prompts
       ? h(
           Box,
-          { key: 'status', ...ROW, justifyContent: 'flex-end' },
+          { key: 'status', ...ROW },
+          controls ? null : label,
           h(
             Text,
             { dimColor: true },
@@ -718,9 +722,12 @@ export const register: Register = (on, options) => {
       },
     })
 
-    if (!refining) return h(Box, { flexDirection: 'column' }, h(Box, null, runIn, await next(e)), status) as RenderElement
+    // Everything this mod draws is one bordered section above whatever else draws the band (the context ring, Compact), so the two do not
+    // share a row. The border and the Triage label tell them apart; the engine's own band is not touched.
+    const section = (...rows: unknown[]) => h(Box, { key: 'triage', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1 }, ...rows)
+    if (!refining) return h(Box, { flexDirection: 'column' }, section(desktop ? h(Box, ROW, label, runIn) : null, status), await next(e)) as RenderElement
     if (!result) {
-      return h(Box, { flexDirection: 'column' }, h(Box, ROW, h(Text, { dimColor: true }, 'Refine'), ...pickers, runIn, refine), await next(e), status) as RenderElement
+      return h(Box, { flexDirection: 'column' }, section(h(Box, ROW, label, ...pickers, runIn, refine), status), await next(e)) as RenderElement
     }
 
     const last = result
@@ -728,6 +735,7 @@ export const register: Register = (on, options) => {
     const row = h(
       Box,
       { key: 'result', ...ROW },
+      label,
       h(Text, null, count ? `Refined: ${count} issue${count === 1 ? '' : 's'}` : 'Refined: no issues'),
       count
         ? h(Button, {
@@ -760,7 +768,7 @@ export const register: Register = (on, options) => {
       runIn,
     )
     const list = last.expanded ? h(Box, { flexDirection: 'column' }, ...last.issues.map(issue => h(Text, null, `- ${issue}`))) : null
-    return h(Box, { flexDirection: 'column' }, row, list, await next(e), status) as RenderElement
+    return h(Box, { flexDirection: 'column' }, section(row, list, status), await next(e)) as RenderElement
   })
 
   // The band redraws when its show rule's answer flips (the draft empties, crosses 40 characters, gains a line break, starts with /),
