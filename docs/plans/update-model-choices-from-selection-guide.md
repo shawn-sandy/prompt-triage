@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: completed
 modified: 2026-11-11
 type: fix
 created: 2026-11-11
@@ -49,6 +49,7 @@ The `agent.spawn` event's fields beyond `isTeammate`, `resume` and `model` aren'
 - Step 7 baseline, `node scripts/eval-rating.mjs --runs 3` on the unchanged `RATER` and the original 160 cases (2026-11-11), mean correct of 40: simple 40, moderate 38.3, complex 32, long-running 27.7.
 - Step 14 result, reverted. The edited `RATER` (performance optimization and cross-module migration as `complex`, and "a clear spec alone does not make a task moderate") scored, on the same 160 original cases with the 8 new cases' hits taken out: simple 40, moderate 34.7 (down 3.6, over the one-case limit), complex 32 (level), long-running 19 (down 8.7, mostly re-rated `complex`). The 8 new cases alone scored 7 of 8 on all 3 runs; the one miss was "Move the sessions table from Postgres to Redis" rated `long-running`. The `RATER` change is reverted and the 8 new cases are kept, so the eval now holds 168 cases (44 `moderate`, 44 `complex`). The unchanged rubric has not been scored on the 8 new cases.
 - Deviation, step 2: "a prompt rated again replaces the effort minimum" would no longer discriminate, since complex and moderate both set `medium`. The test now re-rates as `simple`, which sets no minimum, and asserts the next request stays at `low` with the status cleared.
+- Deviation, step 18: a refined rewrite is a clear spec, so the rater re-rates it `moderate`, which fits Sonnet and shows no second dialog (the step 14 limit). The live check therefore sends the request in two Sonnet sessions: one chooses Refine prompt and reads the rewrite, the other chooses Switch to opus at the first dialog, then explores and runs `/triage-stats`. The Explore subagent on haiku was observed by the person running the check, not read from the log.
 - Each decision entry gets an `at` field, the UTC date it was logged (`YYYY-MM-DD`), and `/triage-stats since <YYYY-MM-DD>` counts only entries on or after that date. The log has neither a version nor a date today, so a change's effect on cost can't be split from the sessions before it. A date needs no new API, and the release tags give each version's date. UTC keeps one session's date the same on every machine.
 - `since` takes only a real ISO date. Anything else, such as `9/22/2026`, `2026-13-01` or `yesterday`, prints a usage line and no table, since a wrongly parsed date would print a confident, wrong comparison. Entries from before this change have no `at` and are left out of a `since` tally.
 - Build on PR 45 if it has merged before step 1 starts, and otherwise on `main` as it is. The rebase cost lands on whichever change merges second, and building on a merged PR 45 means this plan pays it once, up front.
@@ -88,8 +89,8 @@ The `agent.spawn` event's fields beyond `isTeammate`, `resume` and `model` aren'
 ### Phase: VERIFY
 
 16. [x] Run the full suite and the manifest check. Why: these two commands are the whole CI gate. Verify: `claude plugin test .` exits 0 and `claude plugin validate .` exits 0, with both outputs observed.
-17. Typecheck with `npx tsc --noEmit -p .`. Why: a green suite over code that doesn't typecheck is not verified, and CI has no typecheck. Verify: the command exits 0, or the step reports that `.claude-plugin/types` is missing instead of reporting a pass.
-18. Load the mod with `claude --plugin-dir .` on Sonnet, send a multi-file redesign request, choose Refine prompt, then send it again and choose Switch to opus, ask for an exploration of the codebase, and run `/triage-stats`. Why: the tests mock the engine, so only a live run shows the dialog, the refine goal, the routing and the table together. Verify: the dialog has no "Effort will be at least high"; the rewrite ends with a check to run; the Explore subagent's requests report a haiku model (if step 12 was built); and `/triage-stats` prints the effort table.
+17. [x] Typecheck with `npx tsc --noEmit -p .`. Why: a green suite over code that doesn't typecheck is not verified, and CI has no typecheck. Verify: the command exits 0, or the step reports that `.claude-plugin/types` is missing instead of reporting a pass.
+18. [x] Load the mod with `claude --plugin-dir .` on Sonnet, send a multi-file redesign request and choose Refine prompt; in a fresh Sonnet session send the same request, choose Switch to opus at the first dialog, ask for an exploration of the codebase, and run `/triage-stats`. Why: the tests mock the engine, so only a live run shows the dialog, the refine goal, the routing and the table together. Verify: the dialog has no "Effort will be at least high"; the rewrite ends with a check to run; the Explore subagent's requests report a haiku model (if step 12 was built); and `/triage-stats` prints the effort table.
 
 ## Tests
 
@@ -121,7 +122,7 @@ Tier 1 — This plan changes application code
 
 ## Verification
 
-Run `claude plugin test .` and `claude plugin validate .`; both must exit 0 with their output observed. Run `node scripts/eval-rating.mjs --runs 3` and compare each mean with the baseline recorded in Decisions. Then load the mod with `claude --plugin-dir .` in a session on Sonnet and send "Redesign the auth layer so sessions survive a server restart". The dialog must read "Rated complex" with no high-effort sentence. Refine prompt must return a rewrite that ends with a check to run. Sent again with Switch to opus, a request to explore the codebase must show the Explore subagent on haiku (when step 12 was built). `/triage-stats` must print a table with an Effort column, and `/triage-stats since` with today's UTC date must count that session and none from before this change.
+Run `claude plugin test .` and `claude plugin validate .`; both must exit 0 with their output observed. Run `node scripts/eval-rating.mjs --runs 3` and compare each mean with the baseline recorded in Decisions. Then load the mod with `claude --plugin-dir .` in a session on Sonnet and send "Redesign the auth layer so sessions survive a server restart". The dialog must read "Rated complex" with no high-effort sentence. Refine prompt must return a rewrite that ends with a check to run. In a fresh session, with Switch to opus chosen at the first dialog, a request to explore the codebase must show the Explore subagent on haiku (when step 12 was built). `/triage-stats` must print a table with an Effort column, and `/triage-stats since` with today's UTC date must count that session and none from before this change.
 
 ## Next Steps
 
