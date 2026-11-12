@@ -724,7 +724,8 @@ export const register: Register = (on, options) => {
 
     // Everything this mod draws is one bordered section above whatever else draws the band (the context ring, Compact), so the two do not
     // share a row. The border and the Triage label tell them apart; the engine's own band is not touched.
-    const section = (...rows: unknown[]) => h(Box, { key: 'triage', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1 }, ...rows)
+    // The gap keeps the section's own rows apart (the controls row over the session estimate), which otherwise sit on adjacent lines.
+    const section = (...rows: unknown[]) => h(Box, { key: 'triage', flexDirection: 'column', gap: 'sm', borderStyle: 'round', borderDimColor: true, paddingX: 1 }, ...rows)
     if (!refining) return h(Box, { flexDirection: 'column' }, section(desktop ? h(Box, ROW, label, runIn) : null, status), await next(e)) as RenderElement
     if (!result) {
       return h(Box, { flexDirection: 'column' }, section(h(Box, ROW, label, ...pickers, runIn, refine), status), await next(e)) as RenderElement
