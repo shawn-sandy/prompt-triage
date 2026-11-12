@@ -1276,6 +1276,25 @@ for (const surface of SURFACES) {
   })
 }
 
+// The Triage section's own rows (the controls row over the session estimate) sit on adjacent lines without a gap between them.
+for (const surface of SURFACES) {
+  test(`the Triage section keeps a gap between its rows, idle and after a Refine, on the ${surface}`, async ($, on) => {
+    engine(on, { draft: LONG, review: REVIEWED, surfaces: ['desktop'] })
+    const ui = await band($, surface)
+    const ungapped: string[] = []
+
+    for (const stage of ['idle', 'result']) {
+      if (stage === 'result') await refine(ui)
+      const sections = (await ui.findAll({ type: 'Box' })).filter(box => box.props.key === 'triage')
+      // At least one section is drawn in each stage, so the check below cannot pass by finding none.
+      expect(sections.length).toBeGreaterThan(0)
+      // A step name, not a number, for the same reason as the wrapping rows above: a number is cells, which the terminal draws as blank rows.
+      for (const box of sections) if (typeof box.props.gap !== 'string') ungapped.push(`${stage} triage`)
+    }
+    expect(ungapped).toEqual([])
+  })
+}
+
 // --- The decision log and /triage-stats ---
 
 /** One logged decision, as the store holds it. */
