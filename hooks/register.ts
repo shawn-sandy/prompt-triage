@@ -28,7 +28,7 @@ const LOG_CAP = 200
 /**
  * One logged decision: the rating, the main-loop model before and after, and the option chosen. `id` is random and links to nothing
  * (not the session id, which names the transcript file); it lets a later turn find the entry. `cost` is US dollars spent since the decision,
- * `turns` the turns completed since it, `ctx` the context window's percent used at the latest turn's end, and `effort` the effort level
+ * `prompts` the prompts sent since it, `ctx` the context window's percent used at the latest turn's end, and `effort` the effort level
  * the latest main-loop request ran at. `at` is the UTC date (YYYY-MM-DD) the decision was logged, so /triage-stats can split a tally at a release.
  */
 type Decision = {
@@ -38,18 +38,20 @@ type Decision = {
   chose: string
   id?: string
   cost?: number
+  prompts?: number
+  /** Transcript turns since the decision, slash commands' records included, as entries logged before `prompts` hold. Not tallied. */
   turns?: number
   ctx?: number
   effort?: ModelEffort
   at?: string
 }
 /** The figures a turn records on a decision's entry. */
-type Spend = Pick<Decision, 'cost' | 'turns' | 'ctx' | 'effort'>
+type Spend = Pick<Decision, 'cost' | 'prompts' | 'ctx' | 'effort'>
 /**
  * The entry this session last logged, with the session's cost and turn count when it did, so a turn can record what followed.
- * `sent` holds what was last written to the entry; `turns0` is the session's prompt count when it was logged.
+ * `sent` holds what was last written to the entry; `turns0` is the session's prompt count when it was logged, absent when it could not be read.
  */
-type Tracked = { id: string; base: number; turns0: number; sent: Spend }
+type Tracked = { id: string; base: number; turns0?: number; sent: Spend }
 /** What each rating says it would take, said in the dialog beside the rating so the suggestion is read with its reason. */
 const SIZE: Record<Rating, string> = {
   simple: 'haiku or low effort would do',
@@ -402,13 +404,13 @@ async function log($: EngineInterface, entry: Decision): Promise<void> {
  * Logs a decision under a fresh id and reads the cost so far as its baseline; `turns0` is the prompts sent so far, the baseline for its turns. Never rejects: a failed log or read only
  * means less is tracked. Undefined when there is no cost baseline, since a cost cannot then be told apart from earlier spend.
  */
-async function record($: EngineInterface, entry: Decision, turns0: number): Promise<Tracked | undefined> {
+async function record($: EngineInterface, entry: Decision, turns0: number | undefined): Promise<Tracked | undefined> {
   const id = crypto.randomUUID()
   const base = (await $.session.usage().catch(() => undefined))?.cost?.usd
   // UTC, so one session's date is the same on every machine.
   await log($, { ...entry, id, at: new Date().toISOString().slice(0, 10) }).catch(() => undefined)
-  // `sent` starts at zero cost and turns, so a turn that spent nothing writes neither and the session stays out of those averages.
-  return base === undefined ? undefined : { id, base, turns0, sent: { cost: 0, turns: 0 } }
+  // `sent` starts at zero cost and prompts, so a turn that spent nothing writes neither and the session stays out of those averages.
+  return base === undefined ? undefined : { id, base, turns0, sent: { cost: 0, prompts: 0 } }
 }
 
 /**
@@ -485,13 +487,13 @@ function tally(list: Decision[], since?: string): string {
     )
   }
   // Each average counts only the entries that have its figure, and the count beside it says how many that was.
-  const mean = (of: Decision[], key: 'turns' | 'ctx') => of.map(d => d[key]).filter((n): n is number => typeof n === 'number')
+  const mean = (of: Decision[], key: 'prompts' | 'ctx') => of.map(d => d[key]).filter((n): n is number => typeof n === 'number')
   const usage = (Object.keys(SUGGEST) as Rating[]).flatMap(rating => {
     const of = list.filter(d => d.rating === rating)
-    const [turns, ctx] = [mean(of, 'turns'), mean(of, 'ctx')]
+    const [prompts, ctx] = [mean(of, 'prompts'), mean(of, 'ctx')]
     const avg = (ns: number[], show: (n: number) => string) => (ns.length ? show(ns.reduce((a, b) => a + b, 0) / ns.length) : '-')
-    return turns.length || ctx.length
-      ? [`| ${rating} | ${avg(turns, n => n.toFixed(1))} | ${turns.length} | ${avg(ctx, n => `${n.toFixed(0)}%`)} | ${ctx.length} |`]
+    return prompts.length || ctx.length
+      ? [`| ${rating} | ${avg(prompts, n => n.toFixed(1))} | ${prompts.length} | ${avg(ctx, n => `${n.toFixed(0)}%`)} | ${ctx.length} |`]
       : []
   })
   if (usage.length) {
@@ -577,11 +579,6 @@ async function choose(
   return answer === undefined ? { rating, current, dismissed: true } : { rating, current, answer }
 }
 
-/**
- * The transcript's user turns plus those compactions summarized away: the prompts sent so far, as a conversation's count is first read.
- * Never rejects. It also holds each slash command's record, so the mod reads it once and counts sends from there.
- * Callers assign with `sent ??= n` after the await, so a count another hook set while it read (a send, a /clear) is kept.
- */
 /** Origins of deliveries the person did not send: a background task, a schedule, another session or agent, a follow-up the app queued. */
 const DELIVERED: ReadonlySet<string> = new Set([
   'task-notification',
@@ -601,10 +598,16 @@ const DELIVERED: ReadonlySet<string> = new Set([
  */
 const isSent = (e: PromptSubmitInput) => !e.command && !e.isMeta && !DELIVERED.has(e.origin.kind) && !(e.origin.kind === 'plugin' && !e.origin.asUser)
 
-const readPrompts = ($: EngineInterface, compacted: number): Promise<number> =>
+/**
+ * The transcript's user turns plus those compactions summarized away: the prompts sent so far, as a conversation's count is first read.
+ * It also holds each slash command's record, so the mod reads it once and counts sends from there. Never rejects: undefined when the
+ * read fails, so the count stays unknown and is read again, rather than kept as zero. Callers assign with `sent ??= n` after the await
+ * and only while the same conversation is open, so a count another hook set meanwhile (a send, a /clear) wins and an ended one's is dropped.
+ */
+const readPrompts = ($: EngineInterface, compacted: number): Promise<number | undefined> =>
   $.session.turns().then(
     n => n + compacted,
-    () => 0,
+    () => undefined,
   )
 
 export const register: Register = (on, options) => {
@@ -614,6 +617,8 @@ export const register: Register = (on, options) => {
   // Prompts the person sent this conversation, for the status row: the transcript's user turns also hold each slash command's record.
   // ponytail: seeded once from turns() (startup, a reload, /resume), so a resumed conversation's earlier commands still count there
   let sent: number | undefined
+  // Counts conversations: session.end moves it, so a count read that began in an ended conversation is not kept for the next.
+  let era = 0
   // The model the person picked for the main loop; undefined leaves the session's own.
   let model: string | undefined
   // The least effort the main loop runs at, or with `exact` the effort it runs at; undefined leaves the session's own.
@@ -683,10 +688,12 @@ export const register: Register = (on, options) => {
     const desktop = e.surface === 'desktop'
     // The status row waits for the first prompt: before it there is nothing to cost, clear or compact.
     if (sent === undefined) {
+      const at = era
       const n = await readPrompts($, compacted)
-      sent ??= n
+      if (era === at) sent ??= n
     }
-    const prompts = sent
+    // An unread count shows no row, as before the first prompt.
+    const prompts = sent ?? 0
     const usage = prompts > 0 ? await $.session.usage().catch(() => undefined) : undefined
     if (!desktop && !refining && !prompts) return next(e)
     const { Box, Button, Select, Text } = $.ui.resolve(e)
@@ -881,8 +888,9 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     // Read before any slash command is typed, whose record in the transcript would otherwise count as a prompt.
     if (sent === undefined) {
+      const at = era
       const n = await readPrompts($, compacted)
-      sent ??= n
+      if (era === at) sent ??= n
     }
     await $.command.register({
       name: 'refine-prompt',
@@ -916,9 +924,10 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, pass) => {
     // A prompt the person sent that entered the session counts on the status row; a dropped one does not.
     const counts = isSent(e)
-    if (counts && sent === undefined) {
+    if (sent === undefined) {
+      const at = era
       const n = await readPrompts($, compacted)
-      sent ??= n
+      if (era === at) sent ??= n
     }
     const next = async (x: PromptSubmitInput) => {
       const r = await pass(x)
@@ -950,10 +959,6 @@ export const register: Register = (on, options) => {
     // prompts; the flag rates it either way, and the prompt count is already zero then, so the flag is redundant, not wrong.
     // The prompt count, not the transcript's turns: a slash command typed first is a user turn there. A compaction's summarized prompts
     // are in it too, since the conversation goes on and its next prompt is not a first one.
-    if (!cleared && sent === undefined) {
-      const n = await readPrompts($, compacted)
-      sent ??= n
-    }
     if (!cleared && (sent ?? 0) > 0) return next(e)
     cleared = false
     // A new first prompt (as after /clear) ends the earlier decision's tracking, even when this one is not rated.
@@ -966,7 +971,7 @@ export const register: Register = (on, options) => {
     // Dismissing and handing off change nothing here, so they are logged as chosen and the prompt goes on. Refining is not logged:
     // the rewrite is rated and logged when it is sent, and one prompt should count once.
     if (dismissed || answer === NEW_SESSION) {
-      tracked = await record($, { rating, from: onModel(current), to: onModel(current), chose: dismissed ? 'dismissed' : NEW_SESSION }, sent ?? 0)
+      tracked = await record($, { rating, from: onModel(current), to: onModel(current), chose: dismissed ? 'dismissed' : NEW_SESSION }, sent)
     }
     if (dismissed) return next(e)
     if (answer === NEW_SESSION) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
@@ -977,13 +982,13 @@ export const register: Register = (on, options) => {
       const reviewed = await improve($, e.text, STRONG.includes(rating) && stored.goal === 'auto' ? { ...stored, goal: 'check' } : stored)
       if (reviewed !== undefined) return { drop: asLine(reviewed) }
       // No rewrite will come back to be rated, so this is the session's one entry.
-      tracked = await record($, { rating, from: onModel(current), to: onModel(current), chose: REFINE }, sent ?? 0)
+      tracked = await record($, { rating, from: onModel(current), to: onModel(current), chose: REFINE }, sent)
       return next(e)
     }
 
     const decided = decide(rating, current, answer)
     if (decided.status) $.ui.status(line())
-    tracked = await record($, decided.entry, sent ?? 0)
+    tracked = await record($, decided.entry, sent)
     return next(e)
   }).catch(async ($, e, next) => {
     // A failure here never holds up the prompt. One that failed before `next` ran sends it here, so it is counted here too.
@@ -1010,11 +1015,11 @@ export const register: Register = (on, options) => {
     const usage = await $.session.usage().catch(() => undefined)
     const now = usage?.cost?.usd
     // Prompts sent since the decision, so a slash command's record in the transcript adds none.
-    const count = sent === undefined ? undefined : sent - t.turns0
+    const count = sent === undefined || t.turns0 === undefined ? undefined : sent - t.turns0
     const read: Spend = {
       // Down to four places, so the figure never exceeds /cost; the 1e-6 keeps 0.19999999999999998 from storing as 0.1999.
       cost: now === undefined ? undefined : Math.floor((now - t.base) * 1e4 + 1e-6) / 1e4,
-      turns: count,
+      prompts: count,
       // Absent until the first response of the live window.
       ctx: usage?.context.percent,
       effort: ran,
@@ -1041,6 +1046,7 @@ export const register: Register = (on, options) => {
     compacted = 0
     // /clear starts an empty conversation; /resume and /branch move to one whose count is read afresh.
     sent = cleared ? 0 : undefined
+    era++
     // The status row drops the ended conversation's figures, which no prompt edit redraws under band never.
     $.ui.invalidate('ui.render')
     return next(e)

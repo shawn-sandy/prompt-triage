@@ -47,6 +47,10 @@ type Setup = {
   tokens?: number
   /** Every `$.session.turns()` call rejects; set it after the first prompt, which reads the turn count too. */
   turnsFails?: boolean
+  /** Holds each `$.session.turns()` answer until it settles, answering the count read when the call began. */
+  turnsGate?: Promise<void>
+  /** Runs as each `$.session.turns()` call begins, before the gate. */
+  onTurns?: () => void
   /** Every slash command a test or the mod runs is refused, as a host past its limit would. */
   commandFails?: boolean
   /** Runs as the engine compacts, as the transcript shrinking to its summary would. */
@@ -94,9 +98,12 @@ function engine(on: On, s: Setup) {
   let classified = 0
   let writes = 0
 
-  on('session.turns', () => {
+  on('session.turns', async () => {
     if (s.turnsFails) throw new Error('turns unavailable')
-    return { value: s.turns ?? 0 }
+    const value = s.turns ?? 0
+    s.onTurns?.()
+    await s.turnsGate
+    return { value }
   })
   on('session.model', () => {
     if (s.modelFails) throw new Error('model unavailable')
@@ -1363,6 +1370,8 @@ type Decision = {
   chose: string
   id?: string
   cost?: number
+  prompts?: number
+  /** What entries logged before `prompts` hold. */
   turns?: number
   ctx?: number
   effort?: string
@@ -1772,7 +1781,7 @@ test('a main-loop turn records the turns since the decision and the context perc
   await submit($, 'Now add the tests')
   await complete($)
   const [entry] = seen.store.decisions as Decision[]
-  expect(entry?.turns).toBe(2)
+  expect(entry?.prompts).toBe(2)
   expect(entry?.ctx).toBe(42)
   // Cost still lands in the same update.
   expect(entry?.cost).toBe(1)
@@ -1789,7 +1798,7 @@ test('a later turn replaces turns and ctx on the same entry, and unchanged figur
   await complete($)
   const list = seen.store.decisions as Decision[]
   expect(list.length).toBe(1)
-  expect([list[0]?.turns, list[0]?.ctx]).toEqual([3, 35])
+  expect([list[0]?.prompts, list[0]?.ctx]).toEqual([3, 35])
   const writes = seen.writes()
   await complete($)
   expect(seen.writes()).toBe(writes)
@@ -1803,7 +1812,7 @@ test("a subagent's turn records neither turns nor ctx", async ($, on) => {
   s.turns = 3
   await complete($, 'sub-1')
   const [entry] = seen.store.decisions as Decision[]
-  expect(entry && 'turns' in entry).toBe(false)
+  expect(entry && 'prompts' in entry).toBe(false)
   expect(entry && 'ctx' in entry).toBe(false)
 })
 
@@ -1820,7 +1829,7 @@ test('turns counts from the decision, so a /clear whose turn count still holds t
   await submit($, 'Redesign the billing layer')
   s.turns = 5
   await complete($)
-  expect((seen.store.decisions as Decision[]).map(d => [d.turns, d.ctx])).toEqual([
+  expect((seen.store.decisions as Decision[]).map(d => [d.prompts, d.ctx])).toEqual([
     [1, 10],
     [1, 8],
   ])
@@ -1836,7 +1845,7 @@ test('a fresh session with no context percent yet records no ctx, and the cost s
   const [entry] = seen.store.decisions as Decision[]
   expect(entry && 'ctx' in entry).toBe(false)
   expect(entry?.cost).toBe(0.5)
-  expect(entry?.turns).toBe(1)
+  expect(entry?.prompts).toBe(1)
 })
 
 test("a turn count that cannot be read at a turn's end changes nothing, since turns are the prompts sent", async ($, on) => {
@@ -1847,7 +1856,7 @@ test("a turn count that cannot be read at a turn's end changes nothing, since tu
   s.turnsFails = true
   expect((await complete($, undefined, 'All done.')).text).toBe('All done.')
   const [entry] = seen.store.decisions as Decision[]
-  expect([entry?.turns, entry?.cost, entry?.ctx]).toEqual([1, 1, 42])
+  expect([entry?.prompts, entry?.cost, entry?.ctx]).toEqual([1, 1, 42])
 })
 
 test('a usage reading that fails at the end of a turn still records turns, leaves cost and ctx out, and the answer passes through', async ($, on) => {
@@ -1859,7 +1868,7 @@ test('a usage reading that fails at the end of a turn still records turns, leave
   await submit($, 'Now add the tests')
   expect((await complete($, undefined, 'All done.')).text).toBe('All done.')
   const [entry] = seen.store.decisions as Decision[]
-  expect(entry?.turns).toBe(2)
+  expect(entry?.prompts).toBe(2)
   expect(entry && 'cost' in entry).toBe(false)
   expect(entry && 'ctx' in entry).toBe(false)
 })
@@ -1878,10 +1887,10 @@ test('the store still holds neither the prompt text nor the session id once turn
 
 test('/triage-stats averages turns and context percent per rating, with the session count beside each', async ($, on) => {
   const decisions: Decision[] = [
-    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', turns: 3, ctx: 40 },
-    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'b', turns: 4, ctx: 50 },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', prompts: 3, ctx: 40 },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'b', prompts: 4, ctx: 50 },
     // Turns without a ctx, and an entry with neither: each is left out of the average it has no figure for.
-    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'dismissed', id: 'c', turns: 5 },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'dismissed', id: 'c', prompts: 5 },
     { rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'dismissed', id: 'd' },
     // A rating with only a context figure.
     { rating: 'simple', from: 'claude-sonnet-5-5', to: 'haiku', chose: 'Switch to haiku', id: 'e', ctx: 10 },
@@ -1900,9 +1909,21 @@ test('/triage-stats averages turns and context percent per rating, with the sess
   expect(text).not.toContain('$')
 })
 
-test('/triage-stats shows the turns table beside the cost table when entries have both', async ($, on) => {
+// Entries from before the count was of prompts hold transcript turns under `turns`, which also counted slash commands.
+test('/triage-stats averages prompts sent only, leaving out the transcript turns older entries recorded', async ($, on) => {
   const decisions: Decision[] = [
-    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', cost: 1, turns: 2, ctx: 30 },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', turns: 9, ctx: 40 },
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'b', prompts: 1, ctx: 50 },
+  ]
+  engine(on, { turns: 3, store: { decisions } })
+
+  const { text } = await command($, 'triage-stats')
+  expect(text).toContain('| complex | 1.0 | 1 | 45% | 2 |')
+})
+
+test('/triage-stats shows the prompts table beside the cost table when entries have both', async ($, on) => {
+  const decisions: Decision[] = [
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', cost: 1, prompts: 2, ctx: 30 },
   ]
   engine(on, { turns: 3, store: { decisions } })
 
@@ -1916,7 +1937,7 @@ test('/triage-stats shows no turns table when no entry has turns or ctx', async 
   engine(on, { turns: 3, store: { decisions } })
 
   const { text } = await command($, 'triage-stats')
-  expect(text).not.toMatch(/turns|context/i)
+  expect(text).not.toMatch(/prompts|context/i)
 })
 
 test('a simple prompt two tiers above haiku lists the switch before the low-effort option', async ($, on) => {
@@ -2103,6 +2124,32 @@ test('a sent prompt redraws the band, and a slash command does not', async ($, o
   expect(seen.redraws()).toBe(before + 1)
 })
 
+// A count that could not be read is not a count of zero: the row and the first-prompt check would keep it all session.
+test('a prompt count that cannot be read is read again later, not kept as zero', async ($, on) => {
+  const s: Setup = { turns: 3, turnsFails: true }
+  engine(on, s)
+  expect(await (await band($)).find({ key: 'status' })).toBeUndefined()
+  s.turnsFails = false
+  expect(await (await band($)).find({ type: 'Text', text: /\b3 prompts\b/ })).toBeDefined()
+})
+
+// A read that began before /resume answers for the conversation that ended.
+test('a count read still running when the conversation ends is not kept for the next one', async ($, on) => {
+  let open = () => {}
+  let begun = () => {}
+  const reading = new Promise<void>(r => (begun = r))
+  const s: Setup = { turns: 7, turnsGate: new Promise<void>(r => (open = r)), onTurns: () => begun() }
+  engine(on, s)
+  const drawn = band($)
+  await reading
+  await $.session.end({ reason: 'resume', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 2
+  s.turnsGate = undefined
+  open()
+  await drawn
+  expect(await (await band($)).find({ type: 'Text', text: /\b2 prompts\b/ })).toBeDefined()
+})
+
 // The transcript records a slash command as a user turn, so /compact read as one more prompt and /clear as the first.
 test('the row counts prompts sent, not slash commands, hidden prompts or dropped ones', async ($, on) => {
   const s: Setup = { turns: 2, refuse: 'Dropped before it entered' }
@@ -2146,7 +2193,7 @@ test('the turns a decision records are the prompts sent since it, not transcript
   // The prompt, then /compact and /model recorded as user turns.
   s.turns = 3
   await complete($)
-  expect((seen.store.decisions as Decision[])[0]?.turns).toBe(1)
+  expect((seen.store.decisions as Decision[])[0]?.prompts).toBe(1)
 })
 
 test('a prompt sent through a failed hook still counts on the status row', async ($, on) => {

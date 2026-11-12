@@ -168,10 +168,14 @@ cost, `/triage-stats` adds a second table: for each rating and choice (switched
 model, low effort, kept the model, or handed off to a new session), how many
 sessions have a cost and their average.
 
-The same update also sets two more optional numbers on the entry. `turns` is how
-many prompts you have sent since the decision was logged, counted from the
-session's prompt count at that moment. A slash command is not a prompt, and a
-conversation that follows a `/clear` does not inherit the cleared one's prompts. `ctx` is the share of the context window in use,
+The same update also sets two more optional numbers on the entry. `prompts` is
+how many prompts you have sent since the decision was logged, counted from the
+session's prompt count at that moment, and left out when that count could not be
+read. A slash command is not a prompt, and a conversation that follows a `/clear`
+does not inherit the cleared one's prompts. Entries logged by earlier versions
+hold `turns` instead, the transcript's user turns including slash commands;
+`/triage-stats` leaves those out of the prompts average, since the two count
+different things. `ctx` is the share of the context window in use,
 as a whole percent, at the end of the latest turn; it is left out until the
 session has had its first response, and it can fall after a compaction. `ctx` is
 left out when it cannot be read. When at least one entry has either,
@@ -416,15 +420,17 @@ request at all.
   logged, including subagents and any other mod's model calls, until the
   session ends or `/clear`, `/resume` or `/branch` runs. An entry already pushed
   out by the 200-entry cap is not updated or added back.
-- `turns` and `ctx` are recorded only for a session that also has a cost
+- `prompts` and `ctx` are recorded only for a session that also has a cost
   baseline, which every session in the CLI has. `ctx` is the latest reading,
   not a peak, so a compaction late in a session lowers it.
 - The prompt count is read from the conversation once, at session start, after
   `/resume` or `/branch`, and when the mod is reloaded mid-conversation, then
   kept by counting sends. A read taken mid-conversation includes the slash
   commands typed before it, which the transcript records as user turns, so the
-  count can run high there until a `/clear`.
-- Sessions differ in task, so the cost table and the turns and context table
+  count can run high there until a `/clear`. A read that fails is tried again on
+  the next draw or prompt, and a read still running when the conversation ends
+  is dropped.
+- Sessions differ in task, so the cost table and the prompts and context table
   show which choices went with cheaper, shorter or fuller sessions, not that a
   choice made them so. `/triage-stats` says so under the tables.
 - Whether a request takes effort is read from the session's model. If you
