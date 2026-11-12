@@ -87,7 +87,7 @@ desktop app it can also hand a complex or long-running task to a new session.
 8. Each rating also sets a minimum effort: none for simple, `medium` for
    moderate, complex and long-running. See [Effort](#effort).
 9. Every decision is written to a log in the mod's store, along with its UTC
-   date, what the session cost, how many turns it ran, how full its context
+   date, what the session cost, how many prompts you sent after it, how full its context
    got and the effort it ran at, and `/triage-stats` prints the tally. See
    [The decision log](#the-decision-log).
 
@@ -169,13 +169,12 @@ model, low effort, kept the model, or handed off to a new session), how many
 sessions have a cost and their average.
 
 The same update also sets two more optional numbers on the entry. `turns` is how
-many turns the session has completed since the decision was logged, counted from
-the turn count at that moment, so a conversation that follows a `/clear` does not
-inherit the cleared one's turns. `ctx` is the share of the context window in use,
+many prompts you have sent since the decision was logged, counted from the
+session's prompt count at that moment. A slash command is not a prompt, and a
+conversation that follows a `/clear` does not inherit the cleared one's prompts. `ctx` is the share of the context window in use,
 as a whole percent, at the end of the latest turn; it is left out until the
-session has had its first response, and it can fall after a compaction. Each is
-left out when it cannot be read, and `turns` is also left out when the count has
-fallen below what it was at the decision. When at least one entry has either,
+session has had its first response, and it can fall after a compaction. `ctx` is
+left out when it cannot be read. When at least one entry has either,
 `/triage-stats` adds a table with one row per rating: the average turns, the
 average context percent, and beside each the number of sessions that had that
 figure. An entry missing one figure is left out of that average only, and a
@@ -330,16 +329,16 @@ it never makes the `prompt.submit` call, and it runs no other command.
 
 | Hook | When it acts | What it may change |
 | --- | --- | --- |
-| `session.start` | Each session start. | Registers the `/refine-prompt` and `/triage-stats` commands. |
+| `session.start` | Each session start. | Registers the `/refine-prompt` and `/triage-stats` commands, and reads the conversation's prompt count once, before any slash command you type adds a user turn to the transcript. |
 | `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, unless a survey holds the band. | Draws the bordered Triage section: the refine controls (Goal, Workflow and Scope pickers and **Refine**, or the result row after a refine) when the draft meets the `band` setting, after the first prompt the status row (cost, prompts, tokens in context and **Manage context**, which runs `/clear` or `/compact` when you pick one in its dialog), and in the desktop app the **Run in** picker. The section sits above whatever else draws the band. **Refine** puts its rewrite in the prompt box and **Restore original** puts the draft back; nothing else changes until you send. |
 | `prompt.edit`, `prompt.change` | Each change to the prompt box. | Change nothing. Redraw the band when the draft starts or stops meeting the `band` setting. |
-| `prompt.submit` | On any prompt you send (typed, including over a running turn, or through Remote Control) that is not a slash command or a meta prompt while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`, when no turn is running. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
+| `prompt.submit` | On any prompt you send (typed, including over a running turn, or through Remote Control) that is not a slash command or a meta prompt while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`, when no turn is running. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. Counts each prompt that enters toward the status row's prompt count and the first-prompt check; a slash command, a meta prompt and a dropped prompt are not counted. If the hook fails, the prompt is sent unchanged and still counted. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. Remembers the effort the request ran at, for the decision log. |
 | `agent.spawn` | Each subagent about to start. | After a switch up to `opus` or `fable`, sets the built-in Explore subagent's model to `haiku` when its request names none. A resumed run, a teammate, another agent type and an Explore agent from a plugin or from you pass through untouched. |
-| `turn.complete` | The end of each main-loop turn. Subagent turns pass through untouched. | Changes nothing in the turn. Redraws the band so the status row's prompt count updates even when the cost and context did not move. After a rated first prompt, reads the session's cost, turn count, context percent and effort and, for each that changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
-| `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Redraws the band so the status row drops the ended conversation's figures. Stops recording onto the ended session's entry, and after `/clear` marks the next prompt to be rated as a first prompt. |
+| `turn.complete` | The end of each main-loop turn. Subagent turns pass through untouched. | Changes nothing in the turn. Redraws the band so the status row shows the prompt a send added even when the cost and context did not move. After a rated first prompt, reads the session's cost, context percent and effort, and works out the prompts sent since the decision, and, for each that changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
+| `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Redraws the band so the status row drops the ended conversation's figures. Stops recording onto the ended session's entry. After `/clear` sets the prompt count to zero and marks the next prompt to be rated as a first prompt; after `/resume` or `/branch` reads the count afresh from the new conversation. |
 | `session.measure` | After each main-loop turn whose figures moved, and when a rate-limit window moves. | Changes nothing. Redraws the band when the cost or context moved, so the status row shows the new figures. |
-| `session.compact` | Each compaction of the main conversation: `/compact`, automatic, or picked in the **Manage context** dialog. | Changes nothing in the compaction. Adds the prompts the compaction summarized away to the status row's prompt count, which otherwise counts only the user turns left in the transcript, then redraws the band. A precompute pass is passed through untouched. |
+| `session.compact` | Each compaction of the main conversation: `/compact`, automatic, or picked in the **Manage context** dialog. | Changes nothing in the compaction. Redraws the band. The prompt count is kept, since a compaction sends no prompt; the user turns it summarized away are added only when the count is first read after it, as after a `/resume`. A precompute pass is passed through untouched. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given with the band's picks, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
 | `command.run` (`/triage-stats` only) | Each run of `/triage-stats`, with or without `since <date>`. | Reads the decision log from the store and prints the tally, or a usage line for a date that is not a real ISO date. Changes nothing. |
 | `command.run` (`/model` only) | Each run of `/model`. | Leaves the command unchanged. Clears the mod's model override and its part of the status line. |
@@ -408,7 +407,7 @@ request at all.
   since the store has no atomic update. Two sessions rating their first
   prompt within the same few milliseconds can lose one entry. This is
   accepted: the log is a tally, and a missing row costs nothing else. Each
-  turn that changes a session's cost, turn count or context percent rewrites
+  turn that changes a session's cost, prompt count or context percent rewrites
   the list too, which makes such a loss more likely; a lost figure is put back
   by that session's next turn.
 - A session's cost is everything the session spent after its decision was
@@ -418,6 +417,11 @@ request at all.
 - `turns` and `ctx` are recorded only for a session that also has a cost
   baseline, which every session in the CLI has. `ctx` is the latest reading,
   not a peak, so a compaction late in a session lowers it.
+- The prompt count is read from the conversation once, at session start, after
+  `/resume` or `/branch`, and when the mod is reloaded mid-conversation, then
+  kept by counting sends. A read taken mid-conversation includes the slash
+  commands typed before it, which the transcript records as user turns, so the
+  count can run high there until a `/clear`.
 - Sessions differ in task, so the cost table and the turns and context table
   show which choices went with cheaper, shorter or fuller sessions, not that a
   choice made them so. `/triage-stats` says so under the tables.
@@ -461,7 +465,7 @@ Two things are saved in the mod's store across sessions: the band's Goal,
 Workflow and Scope picks, and the decision log under the key `decisions`, a
 list of at most 200 entries each holding the rating, the main-loop model
 before and after, the option chosen, a random id, the UTC date it was logged,
-the session's cost in US dollars, the turns completed since the decision, the
+the session's cost in US dollars, the prompts sent since the decision, the
 context percent used and the effort level of the latest main-loop request.
 The id is made by the mod and is not the session id, so it points at no
 transcript. No prompt text is logged. `/triage-stats` reads it; nothing else

@@ -42,6 +42,8 @@ type Setup = {
   commandFails?: boolean
   /** Runs as the engine compacts, as the transcript shrinking to its summary would. */
   onCompact?: () => void
+  /** `$.session.model()` rejects, so the first-prompt hook fails before it passes the prompt on. */
+  modelFails?: boolean
   /** A prompt text the session refuses to enter, as another plugin's drop would. */
   refuse?: string
 }
@@ -87,7 +89,10 @@ function engine(on: On, s: Setup) {
     if (s.turnsFails) throw new Error('turns unavailable')
     return { value: s.turns ?? 0 }
   })
-  on('session.model', () => ({ value: s.model ?? 'claude-sonnet-5-5' }))
+  on('session.model', () => {
+    if (s.modelFails) throw new Error('model unavailable')
+    return { value: s.model ?? 'claude-sonnet-5-5' }
+  })
   on('session.surfaces', () => ({ value: s.surfaces ?? ['terminal'] }))
   on('prompt.read', () => ({ value: { text: s.draft ?? '', cursor: (s.draft ?? '').length } }))
   on('session.id', () => ({ value: SESSION_ID }))
@@ -200,10 +205,7 @@ function engine(on: On, s: Setup) {
     if (text === THROW) throw new Error('connection dropped')
     if (text === TIMEOUT) return { value: { isAnswered: false, reason: 'aborted', usage: USAGE } }
     return {
-      value:
-        text === undefined
-          ? { isAnswered: false, reason: 'empty-reply', usage: USAGE }
-          : { isAnswered: true, text, usage: USAGE },
+      value: text === undefined ? { isAnswered: false, reason: 'empty-reply', usage: USAGE } : { isAnswered: true, text, usage: USAGE },
     }
   })
   // The engine resolves each path against the working directory, so a listed path matches by its end.
@@ -213,7 +215,25 @@ function engine(on: On, s: Setup) {
     return { isFilled: s.isFilled ?? true }
   })
 
-  return { writes: () => writes, redraws: () => redraws, store, ran, asked, questions, submitted, steps, status, toasts, filled, reviewed, reviews, completesAtAsk, ratings, spawned, classified: () => classified }
+  return {
+    writes: () => writes,
+    redraws: () => redraws,
+    store,
+    ran,
+    asked,
+    questions,
+    submitted,
+    steps,
+    status,
+    toasts,
+    filled,
+    reviewed,
+    reviews,
+    completesAtAsk,
+    ratings,
+    spawned,
+    classified: () => classified,
+  }
 }
 
 /** Submits a prompt as the person typing it. */
@@ -567,7 +587,10 @@ test("the person's own /effort ends the effort minimum but keeps the model overr
   await step($, undefined, 'low')
   await command($, 'effort', 'low')
   await step($, undefined, 'low')
-  expect(seen.steps.map(s => [s.model, s.effort])).toEqual([['opus', 'medium'], ['opus', 'low']])
+  expect(seen.steps.map(s => [s.model, s.effort])).toEqual([
+    ['opus', 'medium'],
+    ['opus', 'low'],
+  ])
   expect(seen.status.at(-1)).toBe('running opus, not claude-sonnet-5-5')
 })
 
@@ -578,6 +601,8 @@ test('a prompt rated again replaces the effort minimum and its status', async ($
   await submit($, 'Redesign the auth layer')
   await step($, undefined, 'low')
   // Complex and moderate share a minimum now, so a simple rating, which sets none, shows the first one was replaced.
+  // After a /clear, since a later prompt of the same conversation is not rated.
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
   s.rating = 'simple'
   await submit($, 'Fix a typo')
   await step($, undefined, 'low')
@@ -585,7 +610,7 @@ test('a prompt rated again replaces the effort minimum and its status', async ($
   expect(seen.status.at(-1)).toBeUndefined()
 })
 
-test("/model after a raise keeps the effort part of the status line", async ($, on) => {
+test('/model after a raise keeps the effort part of the status line', async ($, on) => {
   const seen = engine(on, { answer: 'Switch to opus' })
 
   await submit($, 'Redesign the auth layer')
@@ -605,7 +630,7 @@ test('a complex prompt makes exactly one model.complete call before the dialog, 
   expect(seen.questions[0]).toMatch(/^Read as: Redesign auth across three services\. Rated complex/)
 })
 
-test('only the restatement\'s first line is shown, and a long one is cut', async ($, on) => {
+test("only the restatement's first line is shown, and a long one is cut", async ($, on) => {
   const seen = engine(on, { answer: 'Keep claude-sonnet-5-5', restate: `${'word '.repeat(40)}\nA second line.` })
 
   await submit($, 'Redesign the auth layer')
@@ -615,7 +640,12 @@ test('only the restatement\'s first line is shown, and a long one is cut', async
 })
 
 test('a restatement that uses a rating word does not change the rating', async ($, on) => {
-  const seen = engine(on, { rating: 'moderate', model: 'claude-opus-5-5', answer: 'Keep claude-opus-5-5', restate: 'Untangle the complex retry logic.' })
+  const seen = engine(on, {
+    rating: 'moderate',
+    model: 'claude-opus-5-5',
+    answer: 'Keep claude-opus-5-5',
+    restate: 'Untangle the complex retry logic.',
+  })
 
   await submit($, 'Untangle the retry logic')
   expect(seen.questions[0]).toContain('Rated moderate')
@@ -674,7 +704,13 @@ test('a rating reply that names a label among other words is taken', async ($, o
   expect(seen.asked[0]).toContain('Switch to sonnet')
 })
 
-for (const [how, rating] of [['names no label', 'unsure'], ['names two labels', 'simple or complex'], ['times out', TIMEOUT], ['fails', undefined], ['throws', THROW]] as const) {
+for (const [how, rating] of [
+  ['names no label', 'unsure'],
+  ['names two labels', 'simple or complex'],
+  ['times out', TIMEOUT],
+  ['fails', undefined],
+  ['throws', THROW],
+] as const) {
   test(`a rating call that ${how} sends the prompt with no dialog`, async ($, on) => {
     const seen = engine(on, { rating, answer: 'Switch to opus' })
 
@@ -1076,7 +1112,10 @@ test('a draft changed during the review is left alone, with a toast and no resul
   expect(seen.asked[0]).toContain('Refine prompt')
 })
 
-for (const [how, review] of [['fails', undefined], ['throws', THROW]] as const) {
+for (const [how, review] of [
+  ['fails', undefined],
+  ['throws', THROW],
+] as const) {
   test(`a review that ${how} leaves the draft alone and says so in a toast`, async ($, on) => {
     const seen = engine(on, { draft: LONG, review })
     const ui = await band($)
@@ -1101,9 +1140,9 @@ test('the result row outlasts a short draft until the prompt is sent', async ($,
   await refine(ui)
 
   s.draft = 'Fix it'
-  expect((await (await band($)).find({ key: 'result' }))).toBeDefined()
+  expect(await (await band($)).find({ key: 'result' })).toBeDefined()
   await submit($, s.draft)
-  expect((await (await band($)).find({ key: 'result' }))).toBeUndefined()
+  expect(await (await band($)).find({ key: 'result' })).toBeUndefined()
 })
 
 test('Refine pressed twice while a review runs reviews once', async ($, on) => {
@@ -1116,7 +1155,14 @@ test('Refine pressed twice while a review runs reviews once', async ($, on) => {
 
 test('the model dialog and /refine-prompt refine with the stored picks', async ($, on) => {
   // Moderate, since a strong rating swaps an Auto Goal for Add a check in the dialog alone.
-  const seen = engine(on, { rating: 'moderate', model: 'claude-opus-5-5', answer: 'Refine prompt', review: Array(3).fill(REVIEWED), draft: LONG, store: { picks: { scope: 'minimal' } } })
+  const seen = engine(on, {
+    rating: 'moderate',
+    model: 'claude-opus-5-5',
+    answer: 'Refine prompt',
+    review: Array(3).fill(REVIEWED),
+    draft: LONG,
+    store: { picks: { scope: 'minimal' } },
+  })
 
   await submit($, 'Redesign the auth layer')
   await command($, 'refine-prompt', 'Redesign the auth layer')
@@ -1301,13 +1347,26 @@ for (const surface of SURFACES) {
 // --- The decision log and /triage-stats ---
 
 /** One logged decision, as the store holds it. */
-type Decision = { rating: string; from: string; to: string; chose: string; id?: string; cost?: number; turns?: number; ctx?: number; effort?: string; at?: string }
+type Decision = {
+  rating: string
+  from: string
+  to: string
+  chose: string
+  id?: string
+  cost?: number
+  turns?: number
+  ctx?: number
+  effort?: string
+  at?: string
+}
 
 test('a rated first prompt appends one decision naming the rating, the models before and after and the choice', async ($, on) => {
   const seen = engine(on, { answer: 'Switch to opus' })
 
   await submit($, 'Redesign the auth layer across three services')
-  expect(seen.store.decisions).toEqual([expect.objectContaining({ rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus' })])
+  expect(seen.store.decisions).toEqual([
+    expect.objectContaining({ rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus' }),
+  ])
 })
 
 test('a prompt that shows no dialog is logged as asked nothing, and a dismissed dialog as dismissed', async ($, on) => {
@@ -1315,6 +1374,7 @@ test('a prompt that shows no dialog is logged as asked nothing, and a dismissed 
   const seen = engine(on, s)
 
   await submit($, 'Rename this function')
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
   s.rating = 'complex'
   await submit($, 'Redesign the auth layer')
   expect((seen.store.decisions as Decision[]).map(d => [d.rating, d.to, d.chose])).toEqual([
@@ -1383,7 +1443,9 @@ test('a Refine whose review fails sends the prompt and logs the rated session as
 
   await submit($, 'Redesign the auth layer')
   expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
-  expect(seen.store.decisions).toEqual([expect.objectContaining({ rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Refine prompt' })])
+  expect(seen.store.decisions).toEqual([
+    expect.objectContaining({ rating: 'complex', from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Refine prompt' }),
+  ])
 })
 
 test('refining then sending the rewrite logs one decision, for the rewrite', async ($, on) => {
@@ -1479,8 +1541,10 @@ test('a turn that spent nothing since the decision records no cost', async ($, o
   await submit($, 'Redesign the auth layer')
   const writes = seen.writes()
   await complete($)
-  expect((seen.store.decisions as Decision[])[0]?.cost).toBeUndefined()
-  expect(seen.writes()).toBe(writes)
+  // The turn adds one prompt to the entry; no cost is written beside it.
+  const [entry] = seen.store.decisions as Decision[]
+  expect(entry && 'cost' in entry).toBe(false)
+  expect(seen.writes()).toBe(writes + 1)
 })
 
 // Rounded down, so the stored figure never exceeds what /cost reports; a live session once stored 0.0116 against a 0.01155778 total.
@@ -1618,6 +1682,7 @@ test('a new first prompt, as after /clear, gets its own id and a cost that leave
 
   await submit($, 'Redesign the auth layer')
   await complete($)
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
   await submit($, 'Redesign the billing layer')
   await complete($)
   const [a, b] = seen.store.decisions as Decision[]
@@ -1648,6 +1713,7 @@ test('a first prompt that is not rated stops the earlier decision from gaining l
   await submit($, 'Redesign the auth layer')
   await complete($)
   // After /clear the ledger may start over, and this prompt's rating fails, so nothing new is logged.
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
   s.rating = undefined
   await submit($, 'Redesign the billing layer')
   await complete($)
@@ -1694,7 +1760,7 @@ test('a main-loop turn records the turns since the decision and the context perc
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer across three services')
-  s.turns = 2
+  await submit($, 'Now add the tests')
   await complete($)
   const [entry] = seen.store.decisions as Decision[]
   expect(entry?.turns).toBe(2)
@@ -1708,9 +1774,9 @@ test('a later turn replaces turns and ctx on the same entry, and unchanged figur
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
-  s.turns = 1
   await complete($)
-  s.turns = 3
+  await submit($, 'Now add the tests')
+  await submit($, 'And the docs')
   await complete($)
   const list = seen.store.decisions as Decision[]
   expect(list.length).toBe(1)
@@ -1740,30 +1806,15 @@ test('turns counts from the decision, so a /clear whose turn count still holds t
   s.turns = 1
   await complete($)
   await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
-  // The count still includes the cleared conversation's three prompts when the next first prompt arrives.
+  // The transcript's count still includes the cleared conversation's three prompts when the next first prompt arrives.
   s.turns = 3
   await submit($, 'Redesign the billing layer')
   s.turns = 5
   await complete($)
-  expect((seen.store.decisions as Decision[]).map(d => [d.turns, d.ctx])).toEqual([[1, 10], [2, 8]])
-})
-
-test('a turn count that fell below the decision time records no turns, and the cost still lands', async ($, on) => {
-  const s: Setup = { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2], pct: [1, 10, 2, 8] }
-  const seen = engine(on, s)
-
-  await submit($, 'Redesign the auth layer')
-  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
-  s.turns = 5
-  await submit($, 'Redesign the billing layer')
-  // The count reads lower than at the decision: a negative figure would poison the average.
-  s.turns = 2
-  await complete($)
-  const second = (seen.store.decisions as Decision[])[1]
-  expect(second && 'turns' in second).toBe(false)
-  expect(second?.cost).toBe(0.5)
-  // Readings: 1 at the first decision, 10 at the second, 2 when the second's turn ends.
-  expect(second?.ctx).toBe(2)
+  expect((seen.store.decisions as Decision[]).map(d => [d.turns, d.ctx])).toEqual([
+    [1, 10],
+    [1, 8],
+  ])
 })
 
 test('a fresh session with no context percent yet records no ctx, and the cost still lands', async ($, on) => {
@@ -1779,7 +1830,7 @@ test('a fresh session with no context percent yet records no ctx, and the cost s
   expect(entry?.turns).toBe(1)
 })
 
-test('a turn count that cannot be read leaves turns out, records the rest, and the answer passes through', async ($, on) => {
+test("a turn count that cannot be read at a turn's end changes nothing, since turns are the prompts sent", async ($, on) => {
   const s: Setup = { answer: 'Switch to opus', usd: [0, 1], pct: [3, 42] }
   const seen = engine(on, s)
 
@@ -1787,8 +1838,7 @@ test('a turn count that cannot be read leaves turns out, records the rest, and t
   s.turnsFails = true
   expect((await complete($, undefined, 'All done.')).text).toBe('All done.')
   const [entry] = seen.store.decisions as Decision[]
-  expect(entry && 'turns' in entry).toBe(false)
-  expect([entry?.cost, entry?.ctx]).toEqual([1, 42])
+  expect([entry?.turns, entry?.cost, entry?.ctx]).toEqual([1, 1, 42])
 })
 
 test('a usage reading that fails at the end of a turn still records turns, leaves cost and ctx out, and the answer passes through', async ($, on) => {
@@ -1797,7 +1847,7 @@ test('a usage reading that fails at the end of a turn still records turns, leave
 
   await submit($, 'Redesign the auth layer')
   s.usageFails = true
-  s.turns = 2
+  await submit($, 'Now add the tests')
   expect((await complete($, undefined, 'All done.')).text).toBe('All done.')
   const [entry] = seen.store.decisions as Decision[]
   expect(entry?.turns).toBe(2)
@@ -1842,7 +1892,9 @@ test('/triage-stats averages turns and context percent per rating, with the sess
 })
 
 test('/triage-stats shows the turns table beside the cost table when entries have both', async ($, on) => {
-  const decisions: Decision[] = [{ rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', cost: 1, turns: 2, ctx: 30 }]
+  const decisions: Decision[] = [
+    { rating: 'complex', from: 'claude-sonnet-5-5', to: 'opus', chose: 'Switch to opus', id: 'a', cost: 1, turns: 2, ctx: 30 },
+  ]
   engine(on, { turns: 3, store: { decisions } })
 
   const { text } = await command($, 'triage-stats')
@@ -1875,10 +1927,17 @@ test('a simple prompt one tier above haiku keeps the low-effort option first', a
 // --- The dialog's wording: the rating and what it suggests, the model you are on, then the choice ---
 
 test('a moderate prompt on opus says what the rating suggests and names the model, with no effort sentence', async ($, on) => {
-  const seen = engine(on, { rating: 'moderate', model: 'claude-opus-5-5', restate: 'add a retry limit to the upload client', answer: 'Keep claude-opus-5-5' })
+  const seen = engine(on, {
+    rating: 'moderate',
+    model: 'claude-opus-5-5',
+    restate: 'add a retry limit to the upload client',
+    answer: 'Keep claude-opus-5-5',
+  })
 
   await submit($, 'Add a retry limit to the upload client')
-  expect(seen.questions[0]).toBe('Read as: add a retry limit to the upload client. Rated moderate: a sonnet-sized task. You are on claude-opus-5-5. Run it how?')
+  expect(seen.questions[0]).toBe(
+    'Read as: add a retry limit to the upload client. Rated moderate: a sonnet-sized task. You are on claude-opus-5-5. Run it how?',
+  )
   expect(seen.asked[0]).toEqual(['Switch to sonnet', 'Keep claude-opus-5-5', 'Refine prompt'])
 })
 
@@ -1925,7 +1984,10 @@ test('a suggestion three tiers above the current model says three', async ($, on
   expect(seen.questions[0]).not.toContain('$')
 })
 
-for (const [rating, model] of [['complex', 'claude-sonnet-5-5'], ['moderate', 'claude-haiku-5-5']] as const) {
+for (const [rating, model] of [
+  ['complex', 'claude-sonnet-5-5'],
+  ['moderate', 'claude-haiku-5-5'],
+] as const) {
   test(`a ${rating} suggestion one tier above ${model} carries no tier wording`, async ($, on) => {
     const seen = engine(on, { rating, model, answer: `Keep ${model}` })
 
@@ -2032,6 +2094,36 @@ test('the row counts prompts sent, not slash commands, hidden prompts or dropped
   expect(await (await band($)).find({ type: 'Text', text: /\b2 prompts\b/ })).toBeDefined()
 })
 
+// The transcript holds a slash command's record as a user turn, so a /model typed first made the first prompt look like a later one.
+test('a slash command typed before the first prompt does not stop that prompt being rated', async ($, on) => {
+  const s: Setup = { answer: 'Keep claude-sonnet-5-5' }
+  const seen = engine(on, s)
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  s.turns = 1
+  await submit($, 'Redesign the auth layer')
+  expect(seen.ratings.length).toBe(1)
+})
+
+test('the turns a decision records are the prompts sent since it, not transcript turns that also hold slash commands', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus', usd: [0, 1] }
+  const seen = engine(on, s)
+  await submit($, 'Redesign the auth layer')
+  // The prompt, then /compact and /model recorded as user turns.
+  s.turns = 3
+  await complete($)
+  expect((seen.store.decisions as Decision[])[0]?.turns).toBe(1)
+})
+
+test('a prompt sent through a failed hook still counts on the status row', async ($, on) => {
+  const s: Setup = { modelFails: true }
+  const seen = engine(on, s)
+  await submit($, 'Redesign the auth layer')
+  expect(seen.submitted.length).toBe(1)
+  expect(await (await band($)).find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
+})
+
 test('a compaction that leaves no user turn keeps the row and its prompt count', async ($, on) => {
   const s: Setup = { turns: 20, usd: 1.1, pct: 70, onCompact: () => (s.turns = 0) }
   engine(on, s)
@@ -2066,7 +2158,11 @@ test('a Clear or Compact the session refuses says so in a toast', async ($, on) 
 test('the status row shows cost, prompts and tokens in context on both surfaces, with or without the pickers', async ($, on) => {
   const s: Setup = { turns: 3, surfaces: ['desktop'], tokens: 48_213 }
   engine(on, s)
-  for (const [surface, draft] of [['terminal', ''], ['desktop', ''], ['terminal', LONG]] as const) {
+  for (const [surface, draft] of [
+    ['terminal', ''],
+    ['desktop', ''],
+    ['terminal', LONG],
+  ] as const) {
     s.draft = draft
     s.usd = 0.4213
     s.pct = 30
@@ -2132,7 +2228,11 @@ test('at the compact threshold the button still reads Manage context and the dia
   expect(seen.ran).toEqual(['compact'])
 })
 
-for (const [answer, ran] of [['Compact', ['compact']], [undefined, []], ['compact it please', []]] as const) {
+for (const [answer, ran] of [
+  ['Compact', ['compact']],
+  [undefined, []],
+  ['compact it please', []],
+] as const) {
   test(`answering ${answer ?? 'nothing'} under a Clear recommendation runs ${ran[0] ?? 'nothing'}`, async ($, on) => {
     const seen = engine(on, { turns: 2, usd: 0.1, pct: 40, answer })
     const ui = await band($)
@@ -2255,14 +2355,17 @@ test('/triage-stats prints average cost by rating and effort, counting only entr
 
 test('/triage-stats shows no effort table when no entry has both an effort and a cost', async ($, on) => {
   const base = { from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5', chose: 'Keep claude-sonnet-5-5' }
-  const decisions: Decision[] = [{ rating: 'complex', ...base, cost: 1 }, { rating: 'complex', ...base, effort: 'medium' }]
+  const decisions: Decision[] = [
+    { rating: 'complex', ...base, cost: 1 },
+    { rating: 'complex', ...base, effort: 'medium' },
+  ]
   engine(on, { turns: 3, store: { decisions } })
 
   const { text } = await command($, 'triage-stats')
   expect(text).not.toContain('| Effort |')
 })
 
-test('a new decision entry carries today\'s UTC date as `at`', async ($, on) => {
+test("a new decision entry carries today's UTC date as `at`", async ($, on) => {
   const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
@@ -2310,7 +2413,11 @@ for (const args of ['since 9/22/2026', 'since 2026-13-01', 'since 2026-02-30', '
 
 /** Spawns a subagent as the Agent tool would, with extra input fields the testing call type leaves out. */
 async function spawn($: Engine, extra: Record<string, unknown> = {}) {
-  return await ($.agent.spawn as (input: Record<string, unknown>) => Promise<unknown>)({ prompt: 'Map the auth code', subagentType: 'Explore', ...extra })
+  return await ($.agent.spawn as (input: Record<string, unknown>) => Promise<unknown>)({
+    prompt: 'Map the auth code',
+    subagentType: 'Explore',
+    ...extra,
+  })
 }
 
 test('after Switch to opus an Explore spawn with no model of its own runs on haiku', async ($, on) => {
@@ -2385,7 +2492,7 @@ test('a /model of the persons own ends the Explore routing', async ($, on) => {
 
 // --- The plan's Final check, end to end, with the prompt it names ---
 
-test('the plan\'s Final check: refine with a check, switch to opus, Explore on haiku, effort logged and tallied', async ($, on) => {
+test("the plan's Final check: refine with a check, switch to opus, Explore on haiku, effort logged and tallied", async ($, on) => {
   const PROMPT = 'Redesign the auth layer so sessions survive a server restart'
   const today = new Date().toISOString().slice(0, 10)
   const seen = engine(on, { answer: ['Refine prompt', 'Switch to opus'], review: REVIEWED, usd: [0, 2] })
