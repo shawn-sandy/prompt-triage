@@ -1174,6 +1174,12 @@ function keysIn(node: Node | undefined): string[] {
   return kids.flatMap(c => [...(typeof c.props?.key === 'string' ? [c.props.key] : []), ...keysIn(c)])
 }
 
+/** Each string child of `node` that reads exactly `text`, nested ones too. */
+function textsIn(node: Node | undefined, text: string): string[] {
+  const kids = node?.children ?? []
+  return kids.flatMap(c => (c === text ? [text] : typeof c === 'object' && c !== null ? textsIn(c as Node, text) : []))
+}
+
 // The mod's controls (Run in, the pickers, Refine or the result row, the status row and Manage context) are one bordered Triage section,
 // so they read as the mod's own and not as part of the engine's band, which draws beneath them.
 for (const surface of SURFACES) {
@@ -1183,7 +1189,8 @@ for (const surface of SURFACES) {
     const section = (await ui.find({ key: 'triage' })) as Node | undefined
 
     expect(section?.props?.borderStyle).toBe('round')
-    expect(section?.text).toMatch(/Triage/)
+    // Named once: a second label would crowd the first row.
+    expect(textsIn(section, 'Triage')).toEqual(['Triage'])
     const inside = keysIn(section)
     for (const key of ['goal', 'workflow', 'scope', 'refine', 'status', 'tidy']) expect(inside).toContain(key)
     expect(inside.includes('run-in')).toBe(surface === 'desktop')
@@ -1205,6 +1212,23 @@ test('the Triage section is Run in alone on an empty desktop draft before the fi
   engine(on, { surfaces: ['desktop'] })
   const idle = (await (await band($, 'desktop')).find({ key: 'triage' })) as Node | undefined
   expect(keysIn(idle)).toEqual(['run-in'])
+  expect(textsIn(idle, 'Triage')).toEqual(['Triage'])
+})
+
+test('with no controls row, the terminal section names itself in the status row', async ($, on) => {
+  engine(on, { turns: 3, usd: 0.4, pct: 30 })
+  const ui = await band($, 'terminal')
+  const section = (await ui.find({ key: 'triage' })) as Node | undefined
+  expect(textsIn(section, 'Triage')).toEqual(['Triage'])
+  expect(textsIn((await ui.find({ key: 'status' })) as Node | undefined, 'Triage')).toEqual(['Triage'])
+})
+
+test('after a Refine the Triage label is in the result row, once', async ($, on) => {
+  engine(on, { draft: LONG, review: REVIEWED, surfaces: ['desktop'] })
+  const ui = await band($, 'desktop')
+  await refine(ui)
+  expect(textsIn((await ui.find({ key: 'triage' })) as Node | undefined, 'Triage')).toEqual(['Triage'])
+  expect(textsIn((await ui.find({ key: 'result' })) as Node | undefined, 'Triage')).toEqual(['Triage'])
 })
 
 test('Refine returns at once and reviews from a timer, since a press has a 10 s budget the review and questions outlast', async ($, on) => {
