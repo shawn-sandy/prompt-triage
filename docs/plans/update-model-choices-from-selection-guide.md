@@ -88,7 +88,7 @@ The `agent.spawn` event's fields beyond `isTeammate`, `resume` and `model` aren'
 ### Phase: VERIFY
 
 16. [x] Run the full suite and the manifest check. Why: these two commands are the whole CI gate. Verify: `claude plugin test .` exits 0 and `claude plugin validate .` exits 0, with both outputs observed.
-17. Typecheck with `npx tsc --noEmit -p .`. Why: a green suite over code that doesn't typecheck is not verified, and CI has no typecheck. Verify: the command exits 0, or the step reports that `.claude-plugin/types` is missing instead of reporting a pass.
+17. [x] Typecheck with `npx tsc --noEmit -p .`. Why: a green suite over code that doesn't typecheck is not verified, and CI has no typecheck. Verify: the command exits 0, or the step reports that `.claude-plugin/types` is missing instead of reporting a pass.
 18. Load the mod with `claude --plugin-dir .` on Sonnet, send a multi-file redesign request, choose Refine prompt, then send it again and choose Switch to opus, ask for an exploration of the codebase, and run `/triage-stats`. Why: the tests mock the engine, so only a live run shows the dialog, the refine goal, the routing and the table together. Verify: the dialog has no "Effort will be at least high"; the rewrite ends with a check to run; the Explore subagent's requests report a haiku model (if step 12 was built); and `/triage-stats` prints the effort table.
 
 ## Tests

@@ -138,7 +138,8 @@ function engine(on: On, s: Setup) {
     classified++
     return { value: s.rating ?? 'complex' }
   })
-  on('tool.call', { tool: 'AskUserQuestion' }, (_$, e) => {
+  on('tool.call', (_$, e, next) => {
+    if (e.tool !== 'AskUserQuestion') return next(e)
     const q = e.questions[0]!
     completesAtAsk.push(completes)
     asked.push(q.options.map(o => o.label))
@@ -802,7 +803,7 @@ test('the refine review gets a reply cap of at least 4096 tokens that grows with
 })
 
 /** The refine band's props as the engine draws it above an idle prompt. */
-const BAND = { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} }
+const BAND = { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} }
 
 /** Draws the refine band on `surface` and sets its Run in pick to New session. */
 async function armHandOff($: Engine, surface: 'desktop' | 'terminal' = 'desktop') {
