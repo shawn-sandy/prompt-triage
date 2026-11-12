@@ -18,6 +18,11 @@ jobs:
     #   github.event.pull_request.user.login == 'new-developer' ||
     #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
 
+    # Run only when a person sent the event. claude-code-action fails the check
+    # when the actor's account type is not "User" and it is not in allowed_bots
+    # (e.g. the bump-version PRs, or a bot pushing to a PR).
+    if: github.event.sender.type == 'User'
+
     runs-on: ubuntu-latest
     permissions:
       contents: read
