@@ -152,10 +152,10 @@ function engine(on: On, s: Setup) {
     status.push(e.text)
     return { value: undefined }
   })
-  // The engine's own band beneath the plugin: empty, as when no survey or other mod draws there.
+  // The engine's own band beneath the plugin: the controls the engine and other mods draw there (the context ring, Compact), stood in for by one Text.
   on('ui.render', { component: 'AbovePrompt' }, $ => {
-    const { Box } = $.ui.resolve({ surface: 'terminal', component: 'AbovePrompt' })
-    return h(Box, null) as RenderElement
+    const { Box, Text } = $.ui.resolve({ surface: 'terminal', component: 'AbovePrompt' })
+    return h(Box, null, h(Text, null, ENGINE_BAND)) as RenderElement
   })
   on('ui.toast', (_$, e) => {
     toasts.push(e.text)
@@ -1164,6 +1164,49 @@ test('the pickers are drawn Goal, Workflow, Scope, as the proposal lays them out
   }
 })
 
+/** What the stand-in for the engine's own band draws; see `engine`. */
+const ENGINE_BAND = 'engine band'
+/** The element a mount's `find` returns, as far as these tests read it. */
+type Node = { props?: Record<string, unknown>; children?: unknown[]; text?: string }
+/** The key of every element drawn inside `node`, nested ones too. */
+function keysIn(node: Node | undefined): string[] {
+  const kids = (node?.children ?? []).filter((c): c is Node => typeof c === 'object' && c !== null)
+  return kids.flatMap(c => [...(typeof c.props?.key === 'string' ? [c.props.key] : []), ...keysIn(c)])
+}
+
+// The mod's controls (Run in, the pickers, Refine or the result row, the status row and Manage context) are one bordered Triage section,
+// so they read as the mod's own and not as part of the engine's band, which draws beneath them.
+for (const surface of SURFACES) {
+  test(`the mod's controls sit together in one bordered Triage section on the ${surface}`, async ($, on) => {
+    engine(on, { draft: LONG, surfaces: ['desktop'], turns: 3, usd: 0.4, pct: 30 })
+    const ui = await band($, surface)
+    const section = (await ui.find({ key: 'triage' })) as Node | undefined
+
+    expect(section?.props?.borderStyle).toBe('round')
+    expect(section?.text).toMatch(/Triage/)
+    const inside = keysIn(section)
+    for (const key of ['goal', 'workflow', 'scope', 'refine', 'status', 'tidy']) expect(inside).toContain(key)
+    expect(inside.includes('run-in')).toBe(surface === 'desktop')
+    // The engine's own band is drawn, and outside the section.
+    expect(await ui.find({ type: 'Text', text: ENGINE_BAND })).toBeDefined()
+    expect(section?.text).not.toContain(ENGINE_BAND)
+  })
+}
+
+test('the Triage section holds the result row after a Refine', async ($, on) => {
+  engine(on, { draft: LONG, review: REVIEWED, surfaces: ['desktop'] })
+  const ui = await band($, 'desktop')
+  await refine(ui)
+  const result = keysIn((await ui.find({ key: 'triage' })) as Node | undefined)
+  for (const key of ['result', 'done', 'restore', 'run-in']) expect(result).toContain(key)
+})
+
+test('the Triage section is Run in alone on an empty desktop draft before the first prompt', async ($, on) => {
+  engine(on, { surfaces: ['desktop'] })
+  const idle = (await (await band($, 'desktop')).find({ key: 'triage' })) as Node | undefined
+  expect(keysIn(idle)).toEqual(['run-in'])
+})
+
 test('Refine returns at once and reviews from a timer, since a press has a 10 s budget the review and questions outlast', async ($, on) => {
   const seen = engine(on, { draft: LONG, review: REVIEWED })
   const ui = await band($)
@@ -1967,8 +2010,9 @@ test('the status row shows cost, prompts and tokens in context on both surfaces,
     expect(await ui.find({ type: 'Text', text: /\$0\.42\b.*\b3 prompts\b.*\b48\.2K tokens\b/ })).toBeDefined()
     // The token count replaces the context percent on the row.
     expect(await ui.find({ type: 'Text', text: /%/ })).toBeUndefined()
-    // The row sits at the band's right edge.
-    expect((await ui.find({ key: 'status' }))?.props.justifyContent).toBe('flex-end')
+    // The row is inside the Triage section, left-aligned with its controls.
+    expect(keysIn((await ui.find({ key: 'triage' })) as Node | undefined)).toContain('status')
+    expect((await ui.find({ key: 'status' }))?.props.justifyContent).toBeUndefined()
   }
 })
 

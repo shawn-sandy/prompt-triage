@@ -242,10 +242,15 @@ command `/improve`; that name no longer runs.
 ### The refine band
 
 In the terminal and the desktop app, a band above the prompt input offers the
-review while you type, for any prompt in the session:
+review while you type, for any prompt in the session. Everything this mod
+draws there is one bordered **Triage** section above whatever else draws the
+band (the context ring, Compact), so the mod's controls read as a group:
 
 ```text
-Refine  Goal: Auto  Workflow: As written  Scope: As written  Run in: This session   [r] Refine
+╭───────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Triage  Goal: Auto  Workflow: As written  Scope: As written  Run in: This session  [r] Refine │
+│ Session estimate: $0.42 · 3 prompts · 48.2K tokens   Manage context                           │
+╰───────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 **Run in** is drawn in the desktop app only (see above). The band shows when the
@@ -294,13 +299,12 @@ prompt, so the model dialog does not offer **Refine prompt** again for it.
 
 ### The status row
 
-After the first prompt, the bottom row of the band shows a **Session
-estimate** at its right edge: what the session has cost, how many prompts it
-has had and how many tokens are in the context window, with a **Manage context**
-button:
+After the first prompt, the bottom row of the Triage section shows a **Session
+estimate**: what the session has cost, how many prompts it has had and how
+many tokens are in the context window, with a **Manage context** button:
 
 ```text
-                    Session estimate: $0.42 · 3 prompts · 48.2K tokens   Manage context
+Session estimate: $0.42 · 3 prompts · 48.2K tokens   Manage context
 ```
 
 The figures update whenever the engine reports the cost or context moved,
@@ -324,7 +328,7 @@ it never makes the `prompt.submit` call, and it runs no other command.
 | Hook | When it acts | What it may change |
 | --- | --- | --- |
 | `session.start` | Each session start. | Registers the `/refine-prompt` and `/triage-stats` commands. |
-| `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, unless a survey holds the band. | Draws the refine band (Goal, Workflow and Scope pickers and **Refine**, or the result row after a refine) when the draft meets the `band` setting, after the first prompt the status row (cost, prompts, tokens in context and **Manage context**, which runs `/clear` or `/compact` when you pick one in its dialog), and in the desktop app the **Run in** picker, above whatever else draws the band. **Refine** puts its rewrite in the prompt box and **Restore original** puts the draft back; nothing else changes until you send. |
+| `ui.render` (`AbovePrompt` only) | Each draw of the band above the prompt input, unless a survey holds the band. | Draws the bordered Triage section: the refine controls (Goal, Workflow and Scope pickers and **Refine**, or the result row after a refine) when the draft meets the `band` setting, after the first prompt the status row (cost, prompts, tokens in context and **Manage context**, which runs `/clear` or `/compact` when you pick one in its dialog), and in the desktop app the **Run in** picker. The section sits above whatever else draws the band. **Refine** puts its rewrite in the prompt box and **Restore original** puts the draft back; nothing else changes until you send. |
 | `prompt.edit`, `prompt.change` | Each change to the prompt box. | Change nothing. Redraw the band when the draft starts or stops meeting the `band` setting. |
 | `prompt.submit` | On any prompt you send (typed, including over a running turn, or through Remote Control) that is not a slash command or a meta prompt while **Run in** is set to **New session**; otherwise only on the first prompt of a fresh session or of the conversation after a `/clear`, when no turn is running. Every other submission passes through untouched. | Adds the new-session instruction to the prompt's context when **Run in** is set to **New session** (then resets the picker) or when you choose **Open in a new session**. When you choose **Refine prompt**, holds the prompt back, asks up to three clarifying questions, and puts the rewrite in the prompt box; the prompt text is otherwise never changed. Appends the decision to the log in the store. If the hook fails, the prompt is sent unchanged. |
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. Remembers the effort the request ran at, for the decision log. |
