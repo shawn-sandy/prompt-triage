@@ -18,6 +18,10 @@ jobs:
     #   github.event.pull_request.user.login == 'new-developer' ||
     #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
 
+    # Skip bot-authored PRs (the version-bump PRs). claude-code-action refuses
+    # bot actors not listed in allowed_bots, which fails the check.
+    if: github.event.pull_request.user.type != 'Bot'
+
     runs-on: ubuntu-latest
     permissions:
       contents: read
