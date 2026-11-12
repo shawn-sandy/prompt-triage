@@ -580,6 +580,7 @@ async function choose(
 /**
  * The transcript's user turns plus those compactions summarized away: the prompts sent so far, as a conversation's count is first read.
  * Never rejects. It also holds each slash command's record, so the mod reads it once and counts sends from there.
+ * Callers assign with `sent ??= n` after the await, so a count another hook set while it read (a send, a /clear) is kept.
  */
 const readPrompts = ($: EngineInterface, compacted: number): Promise<number> =>
   $.session.turns().then(
@@ -662,7 +663,11 @@ export const register: Register = (on, options) => {
     // Run in is drawn on the desktop surface only: a band drawn there means the desktop app, where start_session exists, is attached.
     const desktop = e.surface === 'desktop'
     // The status row waits for the first prompt: before it there is nothing to cost, clear or compact.
-    const prompts = (sent ??= await readPrompts($, compacted))
+    if (sent === undefined) {
+      const n = await readPrompts($, compacted)
+      sent ??= n
+    }
+    const prompts = sent
     const usage = prompts > 0 ? await $.session.usage().catch(() => undefined) : undefined
     if (!desktop && !refining && !prompts) return next(e)
     const { Box, Button, Select, Text } = $.ui.resolve(e)
@@ -856,7 +861,10 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     // Read before any slash command is typed, whose record in the transcript would otherwise count as a prompt.
-    sent ??= await readPrompts($, compacted)
+    if (sent === undefined) {
+      const n = await readPrompts($, compacted)
+      sent ??= n
+    }
     await $.command.register({
       name: 'refine-prompt',
       description: 'Review a prompt and put an improved one in the prompt box',
@@ -889,10 +897,17 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, pass) => {
     // A prompt that entered the session counts on the status row; a slash command, a hidden prompt or a dropped one does not.
     const counts = !e.command && !e.isMeta
-    if (counts) sent ??= await readPrompts($, compacted)
+    if (counts && sent === undefined) {
+      const n = await readPrompts($, compacted)
+      sent ??= n
+    }
     const next = async (x: PromptSubmitInput) => {
       const r = await pass(x)
-      if (counts && sent !== undefined && r.drop === undefined) sent++
+      if (counts && sent !== undefined && r.drop === undefined) {
+        sent++
+        // The row shows the new count now, not only when the turn ends.
+        $.ui.invalidate('ui.render')
+      }
       return r
     }
     // A send closes the band's result row, and ends any band review running.
@@ -916,7 +931,11 @@ export const register: Register = (on, options) => {
     // prompts; the flag rates it either way, and the prompt count is already zero then, so the flag is redundant, not wrong.
     // The prompt count, not the transcript's turns: a slash command typed first is a user turn there. A compaction's summarized prompts
     // are in it too, since the conversation goes on and its next prompt is not a first one.
-    if (!cleared && (sent ??= await readPrompts($, compacted)) > 0) return next(e)
+    if (!cleared && sent === undefined) {
+      const n = await readPrompts($, compacted)
+      sent ??= n
+    }
+    if (!cleared && (sent ?? 0) > 0) return next(e)
     cleared = false
     // A new first prompt (as after /clear) ends the earlier decision's tracking, even when this one is not rated.
     tracked = undefined
@@ -951,7 +970,10 @@ export const register: Register = (on, options) => {
     // A failure here never holds up the prompt. One that failed before `next` ran sends it here, so it is counted here too.
     if (next.called) return next(e)
     const r = await next(e)
-    if (!e.command && !e.isMeta && sent !== undefined && r.drop === undefined) sent++
+    if (!e.command && !e.isMeta && sent !== undefined && r.drop === undefined) {
+      sent++
+      $.ui.invalidate('ui.render')
+    }
     return r
   })
 

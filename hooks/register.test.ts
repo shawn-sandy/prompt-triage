@@ -2082,6 +2082,18 @@ test('a compaction keeps the prompt count, though the summarized transcript hold
   expect(await (await band($)).find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
 })
 
+// The count moves when the prompt enters, before the turn ends; without a redraw the row shows one prompt fewer for the whole turn.
+test('a sent prompt redraws the band, and a slash command does not', async ($, on) => {
+  const seen = engine(on, { turns: 2 })
+  await band($)
+  let before = seen.redraws()
+  await $.prompt.submit({ text: '/compact', command: { name: 'compact', args: '' }, wait: false, origin: { kind: 'composer' } })
+  expect(seen.redraws()).toBe(before)
+  before = seen.redraws()
+  await submit($, 'Now add the tests')
+  expect(seen.redraws()).toBe(before + 1)
+})
+
 // The transcript records a slash command as a user turn, so /compact read as one more prompt and /clear as the first.
 test('the row counts prompts sent, not slash commands, hidden prompts or dropped ones', async ($, on) => {
   const s: Setup = { turns: 2, refuse: 'Dropped before it entered' }
