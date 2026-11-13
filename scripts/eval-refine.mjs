@@ -43,16 +43,18 @@ async function review(prompt, cwd) {
   const { stdout } = await run('claude', args, { env, cwd, maxBuffer: 16 * 1024 * 1024, timeout: 60_000 })
   const out = JSON.parse(stdout.slice(stdout.indexOf('{')))
   const reply = out.result ?? ''
-  // The mod's review() drops a reply with no <prompt> rewrite, and an error payload or a cut-off reply would score clean on no lines,
-  // so either one fails the script instead.
-  if (out.is_error || !reply.match(/<prompt>([\s\S]*?)<\/prompt>/)?.[1]?.trim()) throw new Error(`no review in the reply: ${reply.slice(0, 200)}`)
+  // The mod's review() drops a reply with no <prompt> rewrite. This also wants the <issues> block, even an empty one, since a reply
+  // without it was not reviewed. An error payload or a cut-off reply would score clean on no lines, so each fails the script instead.
+  const complete = /<issues>[\s\S]*?<\/issues>/.test(reply) && reply.match(/<prompt>([\s\S]*?)<\/prompt>/)?.[1]?.trim()
+  if (out.is_error || !complete) throw new Error(`no review in the reply: ${reply.slice(0, 200)}`)
   return reply
 }
 
-/** What the reviewer puts to the person or lists as a problem: each question's first line and each issue line. */
+/** What the reviewer puts to the person or lists as a problem: each question's first line and each issue line. Only the text before the rewrite counts, as in the mod. */
 function asked(reply) {
-  const questions = [...reply.matchAll(/<question>\s*([^\n]*)/g)].map(m => m[1])
-  const issues = (reply.match(/<issues>([\s\S]*?)<\/issues>/)?.[1] ?? '').split('\n').map(l => l.trim()).filter(Boolean)
+  const head = reply.split('<prompt>')[0]
+  const questions = [...head.matchAll(/<question>\s*([^\n]*)/g)].map(m => m[1])
+  const issues = (head.match(/<issues>([\s\S]*?)<\/issues>/)?.[1] ?? '').split('\n').map(l => l.trim()).filter(Boolean)
   return [...questions, ...issues]
 }
 
@@ -61,6 +63,9 @@ function asked(reply) {
 const cwd = await mkdtemp(join(tmpdir(), 'eval-refine-'))
 let failed = false
 try {
+  // Its own empty git repository, so Claude Code's project root is this folder and not a repository the temp folder sits inside,
+  // whose .claude/settings.local.json would otherwise load (checked with a planted hook).
+  await run('git', ['init', '-q', cwd])
   for (const { prompt, forbid, require } of cases) {
     const replies = new Array(runs)
     let next = 0
