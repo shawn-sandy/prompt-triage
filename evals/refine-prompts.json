@@ -1,0 +1,10 @@
+[
+  {
+    "prompt": "Set up GitHub releases for the current version. Check the existing setup first and think hard about it. IMPORTANT: don't break the bump-version workflow.",
+    "forbid": "what triggers|which (existing )?workflow|where is the bump-version"
+  },
+  {
+    "prompt": "Add a RELEASING.md that explains how a release of this mod is cut",
+    "forbid": "which game|which platform|what platform|what kind of mod"
+  }
+]
