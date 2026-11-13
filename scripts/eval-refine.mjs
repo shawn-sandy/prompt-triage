@@ -44,15 +44,21 @@ async function review(prompt, cwd) {
   const out = JSON.parse(stdout.slice(stdout.indexOf('{')))
   const reply = out.result ?? ''
   // The mod's review() drops a reply with no <prompt> rewrite. This also wants the <issues> block, even an empty one, since a reply
-  // without it was not reviewed. An error payload or a cut-off reply would score clean on no lines, so each fails the script instead.
-  const complete = /<issues>[\s\S]*?<\/issues>/.test(reply) && reply.match(/<prompt>([\s\S]*?)<\/prompt>/)?.[1]?.trim()
+  // without it was not reviewed; it must come before the rewrite, where asked() reads it. An error payload or a cut-off reply would
+  // score clean on no lines, so each fails the script instead.
+  const complete = /<issues>[\s\S]*?<\/issues>/.test(beforeRewrite(reply)) && reply.match(/<prompt>([\s\S]*?)<\/prompt>/)?.[1]?.trim()
   if (out.is_error || !complete) throw new Error(`no review in the reply: ${reply.slice(0, 200)}`)
   return reply
 }
 
-/** What the reviewer puts to the person or lists as a problem: each question's first line and each issue line. Only the text before the rewrite counts, as in the mod. */
+/** The reply up to its rewrite: the only part that counts as the review, as in the mod, which never reads questions after `<prompt>`. */
+function beforeRewrite(reply) {
+  return reply.split('<prompt>')[0]
+}
+
+/** What the reviewer puts to the person or lists as a problem: each question's first line and each issue line. */
 function asked(reply) {
-  const head = reply.split('<prompt>')[0]
+  const head = beforeRewrite(reply)
   const questions = [...head.matchAll(/<question>\s*([^\n]*)/g)].map(m => m[1])
   const issues = (head.match(/<issues>([\s\S]*?)<\/issues>/)?.[1] ?? '').split('\n').map(l => l.trim()).filter(Boolean)
   return [...questions, ...issues]
