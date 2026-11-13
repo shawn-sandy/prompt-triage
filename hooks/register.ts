@@ -347,20 +347,20 @@ async function improve($: EngineInterface, text: string, picks: Picks): Promise<
 }
 
 /**
- * The band's Refine: reworks the draft and puts the rewrite in the prompt box. `stale` when the person kept typing or sent a prompt during the review,
- * so the box is left alone; `empty` when there is no draft; undefined when the review failed or the box did not take the rewrite.
+ * The band's Refine: reworks the draft and puts the rewrite in the prompt box. `stale` when the person kept typing, sent a prompt or the
+ * conversation ended (a /clear, say) during the review, so the box is left alone; `empty` when there is no draft; undefined when the review failed or the box did not take the rewrite.
  */
 async function refineDraft(
   $: EngineInterface,
   picks: Picks,
-  wasSent: () => boolean,
+  isStale: () => boolean,
 ): Promise<{ original: string; issues: string[] } | 'stale' | 'empty' | undefined> {
   const original = (await $.prompt.read()).text
   if (!original.trim()) return 'empty'
   const reviewed = await rework($, original, picks)
   if (!reviewed) return undefined
-  // A send during the review (the box may still hold the same text while a dialog holds the prompt) also leaves the box alone.
-  if (wasSent() || (await $.prompt.read()).text !== original) return 'stale'
+  // A send or an ended conversation during the review (the box may still hold the same text) also leaves the box alone.
+  if (isStale() || (await $.prompt.read()).text !== original) return 'stale'
   // ponytail: a box that refuses the fill (none drawn) loses the rewrite with a toast; the band only draws where a box is
   const { isFilled } = await $.prompt.fill({ text: reviewed.prompt })
   return isFilled ? { original, issues: reviewed.issues } : undefined
@@ -852,12 +852,14 @@ export const register: Register = (on, options) => {
         redraw()
         const used = { ...current }
         const at = sends
+        // A conversation that ended during the review (a /clear, say) makes it stale too, so its finish cannot undo that /clear's reset.
+        const era = count.era
         // The review and its questions outlast the press's 10 s budget, so they run from a timer, which has none.
         $.clock.after(0, () => {
-          void refineDraft($, used, () => sends !== at)
+          void refineDraft($, used, () => sends !== at || count.era !== era)
             .catch(() => undefined)
             .then(done => {
-              if (done === 'stale') $.ui.toast('The draft changed or was sent during the review; press Refine again')
+              if (done === 'stale') $.ui.toast('The draft changed, was sent or was cleared during the review; press Refine again')
               else if (done === undefined) $.ui.toast('Review failed; the prompt was not changed')
               else if (done !== 'empty') {
                 result = { ...done, plan: used.workflow === 'plan', expanded: false }

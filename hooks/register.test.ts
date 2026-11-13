@@ -1139,6 +1139,20 @@ test("a /clear closes the result row, so Restore original cannot put back the cl
   expect(await (await band($)).find({ key: 'result' })).toBeUndefined()
 })
 
+// The review runs from a timer, so a /clear can land while it is still running; its finish must not undo the /clear's reset.
+test('a /clear during a band Refine drops that review: no fill, no result row, and Refine prompt is offered again', async ($, on) => {
+  const seen = engine(on, { draft: LONG, review: REVIEWED, answer: 'Keep claude-sonnet-5-5' })
+  const ui = await band($)
+  await ui.press({ key: 'refine' })
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  await settle()
+  expect(seen.filled).toEqual([])
+  expect(await (await band($)).find({ key: 'result' })).toBeUndefined()
+  await submit($, 'Redesign the auth layer')
+  expect(seen.asked.length).toBe(1)
+  expect(seen.asked[0]).toContain('Refine prompt')
+})
+
 test('Plan first notes in the result row that Shift+Tab cycles to plan mode', async ($, on) => {
   engine(on, { draft: LONG, review: [REVIEWED, REVIEWED], store: { picks: { workflow: 'plan' } } })
   const ui = await band($)

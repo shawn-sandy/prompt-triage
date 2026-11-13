@@ -296,9 +296,9 @@ review the draft. It asks the same questions as **Refine prompt**, then puts
 the rewrite in the prompt box, and the band shows the number of issues, **Show
 issues**, **Restore original** (puts back the draft you had) and **Done**. With
 **Plan first** it also notes that Shift+Tab cycles to plan mode. That row stays
-until you press **Restore original** or **Done**, or send a prompt. If you keep
-typing or send a prompt during the review, the prompt box is left alone and a
-toast asks you to press **Refine** again. If the review fails, a toast says so and the draft is
+until you press **Restore original** or **Done**, send a prompt, or run `/clear`.
+If you keep typing, send a prompt or run `/clear` during the review, the prompt
+box is left alone and a toast asks you to press **Refine** again. If the review fails, a toast says so and the draft is
 unchanged. A refine from the band counts as refining the session's first
 prompt, so the model dialog does not offer **Refine prompt** again for it.
 
