@@ -487,6 +487,15 @@ test('/refine-prompt reviews any prompt and puts the rewrite in the prompt box',
   expect(result.text).toContain('\n- Which services?')
 })
 
+test('the reviewer is told the agent can read the repo, on the first review and on the one with answers', async ($, on) => {
+  const asked = '<issues>\n- Which services?\n</issues>\n<question>Which services?\n- api\n- web\n</question>\n<prompt>Redesign auth.</prompt>'
+  const seen = engine(on, { answer: 'api', review: [asked, REVIEWED] })
+
+  await command($, 'refine-prompt', 'Redesign the auth layer')
+  expect(seen.reviews).toHaveLength(2)
+  for (const r of seen.reviews) expect(r.system).toContain('can read the repo')
+})
+
 test('/refine-prompt with no prompt reviews nothing', async ($, on) => {
   const seen = engine(on, { review: REVIEWED })
 

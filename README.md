@@ -218,7 +218,9 @@ done-criteria, ambiguity, contradictions and unfilled placeholders such as
 
 When the fix needs a fact only you know, such as which files are in scope, the
 review asks you first: up to three questions, one dialog each, with likely
-answers to pick or your own under "Other". A second `haiku` call then rewrites
+answers to pick or your own under "Other". It is told that the agent running
+the prompt can read the repo and run commands, so it does not ask about, or list
+as an issue, anything the agent can find that way. A second `haiku` call then rewrites
 the prompt with your answers, and lists only the issues your answers left
 unfixed. Dismissing a question skips the rest; the answers
 given so far are still used, and with none the first rewrite is kept, as it is
