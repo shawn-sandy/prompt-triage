@@ -100,6 +100,14 @@ imports `RATER` and `parseRating` from `hooks/register.ts`, so both must stay ex
 
 `/reload-plugins` reloads plugins from the prompt.
 
+Without `--plugin-dir`, a plain `claude` or desktop session runs the installed copy of the
+mod, not this checkout or a worktree. Its folder is the `installPath` for `prompt-triage` in
+`~/.claude/plugins/installed_plugins.json`, at the commit it was installed or last updated
+from; the older version folders beside it are not loaded. So edits in a worktree do not show
+in those sessions. `claude --plugin-dir <worktree>` checks `$.ui` output in the terminal only.
+For anything you cannot see there, including desktop-only UI, say visual verification is still
+pending rather than reporting the change as checked.
+
 ## CI and releases
 
 `check.yml` runs `claude plugin validate .` and `claude plugin test .` on every pull request,
