@@ -512,10 +512,11 @@ function isoDate(text: string): boolean {
 
 /**
  * The answer as the log records it: an offered label as is, and free text under "Other" as `other`, with the model alias it named
- * when it named one. The text itself is never stored: it can carry anything the person typed.
+ * when it named one. The text itself is never stored: it can carry anything the person typed. The keep label is matched exactly,
+ * since a model name can hold spaces ("Default (recommended)") and typed text such as "Keep opus" switches to opus.
  */
-function chosen(answer: string): string {
-  if ([LOW_EFFORT, NEW_SESSION, REFINE].includes(answer) || /^(?:Switch to (?:haiku|sonnet|opus|fable)|Keep \S+)$/.test(answer)) return answer
+function chosen(answer: string, current: string): string {
+  if ([LOW_EFFORT, NEW_SESSION, REFINE, keep(current)].includes(answer) || /^Switch to (?:haiku|sonnet|opus|fable)$/.test(answer)) return answer
   const picked = pickedModel(answer)
   return picked ? `other: ${picked}` : 'other'
 }
@@ -659,7 +660,7 @@ export const register: Register = (on, options) => {
    * may call it; the loader lets `$` reach top-level functions alone.
    */
   function decide(rating: Rating, current: string, answer: string | undefined): { entry: Decision; status: boolean } {
-    const chose = answer === undefined ? 'none asked' : chosen(answer)
+    const chose = answer === undefined ? 'none asked' : chosen(answer, current)
     const from = onModel(current)
     // A prompt rated again (the improved one, say) replaces the minimum, so the status is shown afresh.
     exact = answer === LOW_EFFORT
@@ -1048,6 +1049,14 @@ export const register: Register = (on, options) => {
     compacted = 0
     // /clear starts an empty conversation; /resume and /branch move to one whose count is read afresh.
     sent = cleared ? 0 : undefined
+    // The next first prompt after /clear is rated afresh, so the cleared conversation's override, effort and spent Refine offer
+    // end here; a Keep on that prompt then runs the session's own model. /resume and /branch go on with the same work and keep them.
+    if (cleared) {
+      const showing = line() !== undefined
+      model = running = effort = undefined
+      exact = raised = improved = false
+      if (showing) $.ui.status(line())
+    }
     era++
     // The status row drops the ended conversation's figures, which no prompt edit redraws under band never.
     $.ui.invalidate('ui.render')

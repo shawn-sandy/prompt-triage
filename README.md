@@ -102,7 +102,8 @@ line shows `running <name>, not <session model>`, followed by
 `, effort raised to <level>` once the effort was raised, or
 `, effort lowered to low` (see [Effort](#effort)). The model picker and
 `/model` still show the session's own setting, which is why the text names
-both. Running `/model` yourself ends the override.
+both. Running `/model` yourself ends the override. So does `/clear`, since
+its next prompt is rated as a new first prompt; `/resume` and `/branch` keep it.
 
 ## Effort
 
@@ -140,7 +141,8 @@ The mod cannot read your effort before the first request, so it only knows it
 was too low once that request is sent. From then on the status line shows
 `effort raised to <level>`. The effort setting itself still shows the
 session's own value. Running `/effort` yourself ends the minimum or the
-lowered effort; any model override stays.
+lowered effort; any model override stays. `/clear` ends both, and its next
+prompt sets them afresh.
 
 ## The decision log
 
@@ -342,7 +344,7 @@ it never makes the `prompt.submit` call, and it runs no other command.
 | `turn.step` | Each model request while an override, an effort minimum or a lowered effort is set. | Sets the request's model to the one you picked, raises its effort to the minimum when it is lower, or sets it to `low` after **Keep model, effort low**. Subagent requests are left alone. Remembers the effort the request ran at, for the decision log. |
 | `agent.spawn` | Each subagent about to start. | After a switch up to `opus` or `fable`, sets the built-in Explore subagent's model to `haiku` when its request names none. A resumed run, a teammate, another agent type and an Explore agent from a plugin or from you pass through untouched. |
 | `turn.complete` | The end of each main-loop turn. Subagent turns pass through untouched. | Changes nothing in the turn. Redraws the band so the status row shows the prompt a send added even when the cost and context did not move. After a rated first prompt, reads the session's cost, context percent and effort, and works out the prompts sent since the decision, and, for each that changed, sets it on this session's entry in the decision log. If the hook fails, the turn ends unchanged. |
-| `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Redraws the band so the status row drops the ended conversation's figures. Stops recording onto the ended session's entry. After `/clear` sets the prompt count to zero and marks the next prompt to be rated as a first prompt; after `/resume` or `/branch` reads the count afresh from the new conversation. |
+| `session.end` | The session ends, or `/clear`, `/resume` or `/branch` runs. | Changes nothing. Redraws the band so the status row drops the ended conversation's figures. Stops recording onto the ended session's entry. After `/clear` sets the prompt count to zero, marks the next prompt to be rated as a first prompt, and ends the model override, the effort minimum and a spent **Refine prompt** offer; after `/resume` or `/branch` reads the count afresh from the new conversation. |
 | `session.measure` | After each main-loop turn whose figures moved, and when a rate-limit window moves. | Changes nothing. Redraws the band when the cost or context moved, so the status row shows the new figures. |
 | `session.compact` | Each compaction of the main conversation: `/compact`, automatic, or picked in the **Manage context** dialog. | Changes nothing in the compaction. Redraws the band. The prompt count is kept, since a compaction sends no prompt; the user turns it summarized away are added only when the count is first read after it, as after a `/resume`. A precompute pass is passed through untouched. |
 | `command.run` (`/refine-prompt` only) | Each run of `/refine-prompt`. | Reviews the prompt given with the band's picks, asks up to three clarifying questions, and puts the rewrite in the prompt box. Sends nothing. |
@@ -489,7 +491,13 @@ when you choose that option.
 claude --plugin-dir .          # load the mod from this folder
 claude plugin validate .       # check the manifest and hooks module
 claude plugin test .           # run hooks/register.test.ts
+npx --yes -p typescript@5.9 tsc --noEmit -p .   # typecheck
 ```
+
+The typecheck needs `.claude-plugin/types/`, which Claude Code writes the first
+time you run `claude --plugin-dir .` interactively in this folder. The folder is
+in `.gitignore`, so a fresh clone or worktree has none until then, and CI does
+not run the typecheck.
 
 ### Evaluating the rating
 

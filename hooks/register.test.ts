@@ -5,6 +5,8 @@ import type {
   ModelCompleteInput,
   On,
   PromptOrigin,
+  PromptChangeInput,
+  PromptEditInput,
   PromptSubmitInput,
   RenderElement,
   RenderSurface,
@@ -990,6 +992,44 @@ test('the band shows only for a draft that is not empty, not a slash command and
   }
 })
 
+/**
+ * The prompt box's own events, raised as the editor raises them. The test kit runs them on `$.prompt`, but its declarations list
+ * neither as a call there, so this one cast is where the tests reach them.
+ */
+const editor = ($: Engine) =>
+  $.prompt as unknown as { edit: (e: PromptEditInput) => Promise<unknown>; change: (e: PromptChangeInput) => Promise<unknown> }
+
+// Typing redraws the band only when the show rule's answer flips, not on every key.
+test('an edit redraws the band only when the draft starts or stops meeting the show rule', async ($, on) => {
+  const seen = engine(on, {})
+  // The editor beneath the plugin applies the splice, as core does.
+  on('prompt.edit', (_$, e) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
+  const edit = (text: string, inputText: string) =>
+    editor($).edit({ origin: { kind: 'composer' }, text, cursor: text.length, start: text.length, end: text.length, inputText })
+
+  const before = seen.redraws()
+  await edit('', LONG)
+  expect(seen.redraws()).toBe(before + 1)
+  await edit(LONG, '!')
+  expect(seen.redraws()).toBe(before + 1)
+  await edit('', 'Fix it')
+  expect(seen.redraws()).toBe(before + 2)
+})
+
+test('a change to the box from outside an edit redraws the band only when the show rule flips', async ($, on) => {
+  const seen = engine(on, {})
+  on('prompt.change', (_$, e) => ({ text: e.text }))
+  const change = (text: string) => editor($).change({ text, cursor: text.length, origin: { kind: 'history' } })
+
+  const before = seen.redraws()
+  await change(LONG)
+  expect(seen.redraws()).toBe(before + 1)
+  await change(`${LONG} again`)
+  expect(seen.redraws()).toBe(before + 1)
+  await change('')
+  expect(seen.redraws()).toBe(before + 2)
+})
+
 test('band: always shows a short draft', { options: { band: 'always' } }, async ($, on) => {
   engine(on, { draft: 'Fix the typo' })
   expect(await hasPickers(await band($))).toBe(true)
@@ -1445,6 +1485,20 @@ test('free text naming no model is logged as other', async ($, on) => {
   expect((seen.store.decisions as Decision[])[0]?.chose).toBe('other')
 })
 
+test('Keep is logged as its label when the model name has spaces', async ($, on) => {
+  const seen = engine(on, { rating: 'moderate', model: 'Default (recommended)', answer: 'Keep Default (recommended)' })
+
+  await submit($, 'Add a retry limit to the upload client')
+  expect((seen.store.decisions as Decision[])[0]?.chose).toBe('Keep Default (recommended)')
+})
+
+test('free text under Other that starts with Keep and names another model is logged as other, not as Keep', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep opus' })
+
+  await submit($, 'Redesign the auth layer')
+  expect((seen.store.decisions as Decision[])[0]).toEqual(expect.objectContaining({ to: 'opus', chose: 'other: opus' }))
+})
+
 test('a failed store read never lets the next write replace the log', async ($, on) => {
   const old: Decision[] = [{ rating: 'simple', from: 'x', to: 'x', chose: 'old' }]
   const seen = engine(on, { answer: 'Switch to opus', store: { decisions: old }, storeReadFails: true })
@@ -1667,6 +1721,53 @@ test('the next prompt after /resume is not rated, since it continues a conversat
   await submit($, 'Redesign the billing layer')
   expect(seen.ratings.length).toBe(1)
   expect((seen.store.decisions as Decision[]).length).toBe(1)
+})
+
+// A /clear starts a new conversation, so the cleared one's model override, effort and spent Refine offer do not carry into it.
+test('a /clear ends the model override, so a Keep on the next first prompt runs the session model', async ($, on) => {
+  const seen = engine(on, { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'] })
+
+  await submit($, 'Redesign the auth layer')
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  await submit($, 'Redesign the billing layer')
+  await step($)
+  expect(seen.steps.map(x => x.model)).toEqual(['claude-sonnet-5-5'])
+  expect(seen.status.at(-1)).toBeUndefined()
+  expect((seen.store.decisions as Decision[]).at(-1)).toEqual(expect.objectContaining({ from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5' }))
+})
+
+test('a /clear ends the effort minimum, even when the next first prompt is not rated', async ($, on) => {
+  const s: Setup = { answer: 'Keep claude-sonnet-5-5' }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await step($, undefined, 'low')
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  s.rating = undefined
+  await submit($, 'Redesign the billing layer')
+  await step($, undefined, 'low')
+  expect(seen.steps.map(x => x.effort)).toEqual(['medium', 'low'])
+  expect(seen.status.at(-1)).toBeUndefined()
+})
+
+test('a /clear offers Refine prompt again on the next first prompt after one was refined', async ($, on) => {
+  const seen = engine(on, { answer: ['Refine prompt', 'Keep claude-sonnet-5-5'], review: REVIEWED })
+
+  await submit($, 'Redesign the auth layer')
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  await submit($, 'Redesign the billing layer')
+  expect(seen.asked.at(-1)).toContain('Refine prompt')
+})
+
+test('a /resume keeps the model override: only a /clear starts afresh', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus' }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await $.session.end({ reason: 'resume', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 3
+  await step($)
+  expect(seen.steps.map(x => x.model)).toEqual(['opus'])
 })
 
 test('an entry pushed out by the cap is not added back', async ($, on) => {
