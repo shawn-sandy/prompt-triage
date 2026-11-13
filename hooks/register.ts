@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PromptSubmitInput, Register, RenderElement } from 'claude-code'
+import type { EngineInterface, ModelEffort, PromptSubmitInput, Register, RenderElement, TurnStepInput } from 'claude-code'
 
 // Each rating and the model alias it suggests.
 const SUGGEST = { simple: 'haiku', moderate: 'sonnet', complex: 'opus', 'long-running': 'fable' } as const
@@ -686,11 +686,9 @@ function decide(o: Override, rating: Rating, current: string, answer: string | u
  * the first time; `show` says the status line changed. ponytail: only named levels are compared; an integer budget, or a model
  * without effort, is left alone
  */
-function stepEffort(o: Override, level: unknown): { change: boolean; show: boolean } {
+function stepEffort(o: Override, level: TurnStepInput['effort']): { change: boolean; show: boolean } {
   const change =
-    o.effort !== undefined &&
-    typeof level === 'string' &&
-    (o.exact ? level !== o.effort : LEVELS.indexOf(level as ModelEffort) < LEVELS.indexOf(o.effort))
+    o.effort !== undefined && typeof level === 'string' && (o.exact ? level !== o.effort : LEVELS.indexOf(level) < LEVELS.indexOf(o.effort))
   const show = change && !o.raised
   if (show) o.raised = true
   return { change, show }
@@ -710,8 +708,8 @@ function dropEffort(o: Override): void {
 /** Ends the whole override, as a /clear does; true when a status line was showing and now needs clearing. */
 function endOverride(o: Override): boolean {
   const showing = overrideLine(o) !== undefined
-  o.model = o.running = o.effort = undefined
-  o.exact = o.raised = false
+  dropModel(o)
+  dropEffort(o)
   return showing
 }
 
@@ -1095,8 +1093,10 @@ export const register: Register = (on, options) => {
     endCount(count, cleared)
     // The next first prompt after /clear is rated afresh, so the cleared conversation's override, effort and spent Refine offer
     // end here; a Keep on that prompt then runs the session's own model. /resume and /branch go on with the same work and keep them.
+    // A Refine result row closes too: the Manage context button's /clear sends no prompt, so the send that closes it never comes.
     if (cleared) {
       improved = false
+      result = undefined
       if (endOverride(override)) $.ui.status(overrideLine(override))
     }
     // The status row drops the ended conversation's figures, which no prompt edit redraws under band never.

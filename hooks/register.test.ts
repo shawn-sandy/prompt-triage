@@ -1130,6 +1130,15 @@ test('Done closes the result row without touching the prompt box', async ($, on)
   expect(await hasPickers(ui)).toBe(true)
 })
 
+// The Manage context button runs /clear with no prompt.submit, so the send that closes the row never comes.
+test("a /clear closes the result row, so Restore original cannot put back the cleared conversation's draft", async ($, on) => {
+  engine(on, { draft: LONG, review: REVIEWED })
+  await refine(await band($))
+  expect(await (await band($)).find({ key: 'result' })).toBeDefined()
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  expect(await (await band($)).find({ key: 'result' })).toBeUndefined()
+})
+
 test('Plan first notes in the result row that Shift+Tab cycles to plan mode', async ($, on) => {
   engine(on, { draft: LONG, review: [REVIEWED, REVIEWED], store: { picks: { workflow: 'plan' } } })
   const ui = await band($)
@@ -1756,6 +1765,8 @@ test('a /clear offers Refine prompt again on the next first prompt after one was
   await submit($, 'Redesign the auth layer')
   await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
   await submit($, 'Redesign the billing layer')
+  // Two dialogs, so the one checked is the second prompt's and not the first's, which offered Refine too.
+  expect(seen.asked.length).toBe(2)
   expect(seen.asked.at(-1)).toContain('Refine prompt')
 })
 
