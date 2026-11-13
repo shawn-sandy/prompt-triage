@@ -10,15 +10,19 @@
  * A case passes a run when no question's first line and no issue line matches its `forbid` pattern, and, if it has a
  * `require` pattern, at least one such line matches it. The rewrite is not read.
  * Imports REVIEWER from the mod, so it scores the exact text sent, with the pickers at their defaults.
+ * A call that fails, or whose reply has no review, stops the script: a broken harness must not report results.
  * ponytail: the patterns name questions seen in past runs, so a new phrasing of the same mistake slips past; add its pattern to the case.
  */
 import { execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { REVIEWER } from '../hooks/register.ts'
 
 const run = promisify(execFile)
+// As in eval-rating.mjs: a fixed pool, so --runs 99 does not start 99 CLI processes at once.
+const POOL = 6
 const at = process.argv.indexOf('--runs')
 const runs = at === -1 ? 5 : Number(process.argv[at + 1])
 // Plain digits only, as in eval-rating.mjs: Number() would also take 1e21 or 0x2.
@@ -28,15 +32,15 @@ if (at !== -1 && !/^[1-9]\d?$/.test(process.argv[at + 1] ?? '')) {
 }
 const cases = JSON.parse(await readFile(new URL('../evals/refine-prompts.json', import.meta.url), 'utf8'))
 
-/** One review through the CLI at the mod's model, from a folder with no repo, as the mod's call has none; the reply text. */
-async function review(prompt) {
+/** One review through the CLI at the mod's model, from `cwd`, an empty folder with no repo, as the mod's call has none; the reply text. */
+async function review(prompt, cwd) {
   const args = [
     '-p', '--model', 'haiku', '--tools', '', '--no-session-persistence', '--output-format', 'json',
     '--setting-sources', 'project,local', '--strict-mcp-config', '--disable-slash-commands',
     '--system-prompt', REVIEWER, `<user_prompt>\n${prompt}\n</user_prompt>`,
   ]
   const env = { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' }
-  const { stdout } = await run('claude', args, { env, cwd: tmpdir(), maxBuffer: 16 * 1024 * 1024, timeout: 60_000 })
+  const { stdout } = await run('claude', args, { env, cwd, maxBuffer: 16 * 1024 * 1024, timeout: 60_000 })
   const out = JSON.parse(stdout.slice(stdout.indexOf('{')))
   const reply = out.result ?? ''
   // An error payload or a reply with neither tag asked nothing, so it would pass vacuously; fail the script instead.
@@ -51,19 +55,35 @@ function asked(reply) {
   return [...questions, ...issues]
 }
 
+// A private empty folder (mode 700), not the shared temp root: `project,local` settings are on, so any hook sitting in the
+// working folder would run with this user's privileges. User settings stay off so an installed prompt-triage cannot rate these prompts.
+const cwd = await mkdtemp(join(tmpdir(), 'eval-refine-'))
 let failed = false
-for (const { prompt, forbid, require } of cases) {
-  const replies = await Promise.all(Array.from({ length: runs }, () => review(prompt)))
-  // forbid: lines that must not appear. require: at least one line must match, so a reviewer gone silent fails.
-  const hits = replies.map(r => {
-    const lines = asked(r)
-    const bad = forbid ? lines.filter(line => new RegExp(forbid, 'i').test(line)) : []
-    if (require && !lines.some(line => new RegExp(require, 'i').test(line))) bad.push(`(nothing matched require /${require}/)`)
-    return bad
-  })
-  const bad = hits.filter(h => h.length).length
-  console.log(`${bad ? 'FAIL' : 'ok  '} ${runs - bad}/${runs} runs clean: ${prompt.slice(0, 70)}`)
-  for (const line of hits.flat()) console.log(`       asked: ${line}`)
-  if (bad) failed = true
+try {
+  for (const { prompt, forbid, require } of cases) {
+    const replies = new Array(runs)
+    let next = 0
+    await Promise.all(
+      Array.from({ length: Math.min(POOL, runs) }, async () => {
+        while (next < runs) {
+          const i = next++
+          replies[i] = await review(prompt, cwd)
+        }
+      }),
+    )
+    // forbid: lines that must not appear. require: at least one line must match, so a reviewer gone silent fails.
+    const hits = replies.map(r => {
+      const lines = asked(r)
+      const bad = forbid ? lines.filter(line => new RegExp(forbid, 'i').test(line)) : []
+      if (require && !lines.some(line => new RegExp(require, 'i').test(line))) bad.push(`(nothing matched require /${require}/)`)
+      return bad
+    })
+    const bad = hits.filter(h => h.length).length
+    console.log(`${bad ? 'FAIL' : 'ok  '} ${runs - bad}/${runs} runs clean: ${prompt.slice(0, 70)}`)
+    for (const line of hits.flat()) console.log(`       asked: ${line}`)
+    if (bad) failed = true
+  }
+} finally {
+  await rm(cwd, { recursive: true, force: true })
 }
 process.exit(failed ? 1 : 0)
