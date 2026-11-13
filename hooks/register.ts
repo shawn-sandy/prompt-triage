@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PromptSubmitInput, Register, RenderElement } from 'claude-code'
+import type { EngineInterface, ModelEffort, PromptSubmitInput, Register, RenderElement, TurnStepInput } from 'claude-code'
 
 // Each rating and the model alias it suggests.
 const SUGGEST = { simple: 'haiku', moderate: 'sonnet', complex: 'opus', 'long-running': 'fable' } as const
@@ -347,22 +347,26 @@ async function improve($: EngineInterface, text: string, picks: Picks): Promise<
 }
 
 /**
- * The band's Refine: reworks the draft and puts the rewrite in the prompt box. `stale` when the person kept typing or sent a prompt during the review,
- * so the box is left alone; `empty` when there is no draft; undefined when the review failed or the box did not take the rewrite.
+ * The band's Refine: reworks the draft and puts the rewrite in the prompt box. `stale` when the person kept typing, sent a prompt or the
+ * conversation ended (a /clear, say) during the review, so the box is left alone; `empty` when there is no draft; undefined when the review failed or the box did not take the rewrite.
  */
 async function refineDraft(
   $: EngineInterface,
   picks: Picks,
-  wasSent: () => boolean,
+  isStale: () => boolean,
 ): Promise<{ original: string; issues: string[] } | 'stale' | 'empty' | undefined> {
   const original = (await $.prompt.read()).text
   if (!original.trim()) return 'empty'
   const reviewed = await rework($, original, picks)
   if (!reviewed) return undefined
-  // A send during the review (the box may still hold the same text while a dialog holds the prompt) also leaves the box alone.
-  if (wasSent() || (await $.prompt.read()).text !== original) return 'stale'
+  // A send or an ended conversation during the review (the box may still hold the same text) also leaves the box alone.
+  // Checked after the read, so a /clear that lands while the read is pending counts too.
+  if ((await $.prompt.read()).text !== original || isStale()) return 'stale'
   // ponytail: a box that refuses the fill (none drawn) loses the rewrite with a toast; the band only draws where a box is
   const { isFilled } = await $.prompt.fill({ text: reviewed.prompt })
+  // ponytail: a /clear that lands while the fill is pending cannot take the rewrite back out of the box, but the stale answer keeps
+  // the result row and the spent Refine offer from coming back; refilling the original is the upgrade if that window ever matters.
+  if (isStale()) return 'stale'
   return isFilled ? { original, issues: reviewed.issues } : undefined
 }
 
@@ -512,10 +516,11 @@ function isoDate(text: string): boolean {
 
 /**
  * The answer as the log records it: an offered label as is, and free text under "Other" as `other`, with the model alias it named
- * when it named one. The text itself is never stored: it can carry anything the person typed.
+ * when it named one. The text itself is never stored: it can carry anything the person typed. The keep label is matched exactly,
+ * since a model name can hold spaces ("Default (recommended)") and typed text such as "Keep opus" switches to opus.
  */
-function chosen(answer: string): string {
-  if ([LOW_EFFORT, NEW_SESSION, REFINE].includes(answer) || /^(?:Switch to (?:haiku|sonnet|opus|fable)|Keep \S+)$/.test(answer)) return answer
+function chosen(answer: string, current: string): string {
+  if ([LOW_EFFORT, NEW_SESSION, REFINE, keep(current)].includes(answer) || /^Switch to (?:haiku|sonnet|opus|fable)$/.test(answer)) return answer
   const picked = pickedModel(answer)
   return picked ? `other: ${picked}` : 'other'
 }
@@ -610,24 +615,112 @@ const readPrompts = ($: EngineInterface, compacted: number): Promise<number | un
     () => undefined,
   )
 
+/**
+ * The prompts the person sent this conversation, for the status row and the first-prompt check. Changed only by the functions below.
+ * `sent` is undefined until read; the transcript's user turns also hold each slash command's record, so it is seeded once and counted
+ * from there. `compacted` is the user turns compactions summarized away, since turns() counts only those left in the transcript.
+ * `era` counts conversations, so a count read that began in an ended conversation is not kept for the next.
+ * ponytail: seeded once from turns() (startup, a reload, /resume), so a resumed conversation's earlier commands still count there
+ */
+type Count = { sent: number | undefined; compacted: number; era: number }
+
+/** Reads the prompt count when it is unknown; a read that fails leaves it unknown, and one that outlived its conversation is dropped. */
+async function seedCount($: EngineInterface, c: Count): Promise<void> {
+  if (c.sent !== undefined) return
+  const at = c.era
+  const n = await readPrompts($, c.compacted)
+  // `??=`: a count another hook set meanwhile (a send, a /clear) wins.
+  if (c.era === at) c.sent ??= n
+}
+
+/** Counts one prompt the person sent that entered the session, and redraws the row so it shows the new count now. */
+function countSent($: EngineInterface, c: Count): void {
+  if (c.sent === undefined) return
+  c.sent++
+  $.ui.invalidate('ui.render')
+}
+
+/** Ends the conversation's count: /clear starts an empty one at zero; /resume and /branch move to one whose count is read afresh. */
+function endCount(c: Count, cleared: boolean): void {
+  c.compacted = 0
+  c.sent = cleared ? 0 : undefined
+  c.era++
+}
+
+/**
+ * The main loop's model and effort override, and the status line that names it. Changed only by the functions below.
+ * `model` is the model the person picked; undefined leaves the session's own. `effort` is the least effort the main loop runs at,
+ * or with `exact` the effort it runs at; undefined leaves the session's own. `running` and `raised` are the status line's parts:
+ * the model override, and the effort once a request was changed.
+ */
+type Override = { model?: string; running?: string; effort?: ModelEffort; exact: boolean; raised: boolean }
+
+/** The status line the override shows, or undefined when it shows none. */
+const overrideLine = (o: Override) =>
+  [o.running, o.raised && o.effort && `effort ${o.exact ? 'lowered' : 'raised'} to ${o.effort}`].filter(Boolean).join(', ') || undefined
+
+/** The main-loop model as the log names it: the override, or the session's own. */
+const onModel = (o: Override, current: string) => o.model ?? current
+
+/**
+ * Applies the person's answer to a model dialog: the effort the rating sets (or exactly low) and the model the answer names.
+ * Returns the decision to log, and whether the status line changed and needs showing.
+ */
+function decide(o: Override, rating: Rating, current: string, answer: string | undefined): { entry: Decision; status: boolean } {
+  const chose = answer === undefined ? 'none asked' : chosen(answer, current)
+  const from = onModel(o, current)
+  // A prompt rated again (the improved one, say) replaces the minimum, so the status is shown afresh.
+  o.exact = answer === LOW_EFFORT
+  o.effort = o.exact ? 'low' : FLOOR[rating]
+  let status = o.raised
+  o.raised = false
+  // The keep label names the session's model, so it is never read as free text naming one to switch to.
+  const picked = answer === keep(current) ? undefined : pickedModel(answer)
+  if (picked) {
+    o.model = picked
+    // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.
+    o.running = `running ${picked}, not ${current}`
+    status = true
+  }
+  return { entry: { rating, from, to: onModel(o, current), chose }, status }
+}
+
+/**
+ * Whether a main-loop request's effort is changed: below the minimum, or, with `exact`, any other level. Marks the line raised
+ * the first time; `show` says the status line changed. ponytail: only named levels are compared; an integer budget, or a model
+ * without effort, is left alone
+ */
+function stepEffort(o: Override, level: TurnStepInput['effort']): { change: boolean; show: boolean } {
+  const change =
+    o.effort !== undefined && typeof level === 'string' && (o.exact ? level !== o.effort : LEVELS.indexOf(level) < LEVELS.indexOf(o.effort))
+  const show = change && !o.raised
+  if (show) o.raised = true
+  return { change, show }
+}
+
+/** The person's own /model: the model override ends, any effort override stays. */
+function dropModel(o: Override): void {
+  o.model = o.running = undefined
+}
+
+/** The person's own /effort: the effort override ends, any model override stays. */
+function dropEffort(o: Override): void {
+  o.effort = undefined
+  o.exact = o.raised = false
+}
+
+/** Ends the whole override, as a /clear does; true when a status line was showing and now needs clearing. */
+function endOverride(o: Override): boolean {
+  const showing = overrideLine(o) !== undefined
+  dropModel(o)
+  dropEffort(o)
+  return showing
+}
+
 export const register: Register = (on, options) => {
   let tidying = false
-  // User turns that compactions summarized away this conversation: turns() counts only those left in the transcript.
-  let compacted = 0
-  // Prompts the person sent this conversation, for the status row: the transcript's user turns also hold each slash command's record.
-  // ponytail: seeded once from turns() (startup, a reload, /resume), so a resumed conversation's earlier commands still count there
-  let sent: number | undefined
-  // Counts conversations: session.end moves it, so a count read that began in an ended conversation is not kept for the next.
-  let era = 0
-  // The model the person picked for the main loop; undefined leaves the session's own.
-  let model: string | undefined
-  // The least effort the main loop runs at, or with `exact` the effort it runs at; undefined leaves the session's own.
-  let effort: ModelEffort | undefined
-  let exact = false
-  // The status line's parts: the model override, and the effort once a request was changed.
-  let running: string | undefined
-  let raised = false
-  const line = () => [running, raised && effort && `effort ${exact ? 'lowered' : 'raised'} to ${effort}`].filter(Boolean).join(', ') || undefined
+  const count: Count = { sent: undefined, compacted: 0, era: 0 }
+  const override: Override = { exact: false, raised: false }
   // Set once the first prompt was improved, so its rewrite is rated again without a second offer.
   let improved = false
   // The band's Run in pick: true sends the next prompt to a new session, then resets, so it never hands off a later one by surprise.
@@ -650,33 +743,6 @@ export const register: Register = (on, options) => {
   // Set by a /clear, so the next prompt is rated as a first prompt even while the turn count still includes the cleared one's.
   let cleared = false
 
-  /** The main-loop model as the log names it: the override, or the session's own. */
-  const onModel = (current: string) => model ?? current
-
-  /**
-   * Applies the person's answer to a model dialog: the effort the rating sets (or exactly low) and the model the answer names.
-   * Returns the decision to log, and whether the status line changed and needs showing. Touches no engine call itself, so hooks
-   * may call it; the loader lets `$` reach top-level functions alone.
-   */
-  function decide(rating: Rating, current: string, answer: string | undefined): { entry: Decision; status: boolean } {
-    const chose = answer === undefined ? 'none asked' : chosen(answer)
-    const from = onModel(current)
-    // A prompt rated again (the improved one, say) replaces the minimum, so the status is shown afresh.
-    exact = answer === LOW_EFFORT
-    effort = exact ? 'low' : FLOOR[rating]
-    let status = raised
-    raised = false
-    // The keep label names the session's model, so it is never read as free text naming one to switch to.
-    const picked = answer === keep(current) ? undefined : pickedModel(answer)
-    if (picked) {
-      model = picked
-      // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.
-      running = `running ${picked}, not ${current}`
-      status = true
-    }
-    return { entry: { rating, from, to: onModel(current), chose }, status }
-  }
-
   // The Triage section of the band: Goal, Workflow and Scope pickers and Refine (or the result row after one), on the desktop the Run in picker,
   // and after the first prompt the status row, in one bordered box above whatever else draws the band; a survey holds the band alone.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -687,13 +753,9 @@ export const register: Register = (on, options) => {
     // Run in is drawn on the desktop surface only: a band drawn there means the desktop app, where start_session exists, is attached.
     const desktop = e.surface === 'desktop'
     // The status row waits for the first prompt: before it there is nothing to cost, clear or compact.
-    if (sent === undefined) {
-      const at = era
-      const n = await readPrompts($, compacted)
-      if (era === at) sent ??= n
-    }
+    await seedCount($, count)
     // An unread count shows no row, as before the first prompt.
-    const prompts = sent ?? 0
+    const prompts = count.sent ?? 0
     const usage = prompts > 0 ? await $.session.usage().catch(() => undefined) : undefined
     if (!desktop && !refining && !prompts) return next(e)
     const { Box, Button, Select, Text } = $.ui.resolve(e)
@@ -794,12 +856,14 @@ export const register: Register = (on, options) => {
         redraw()
         const used = { ...current }
         const at = sends
+        // A conversation that ended during the review (a /clear, say) makes it stale too, so its finish cannot undo that /clear's reset.
+        const era = count.era
         // The review and its questions outlast the press's 10 s budget, so they run from a timer, which has none.
         $.clock.after(0, () => {
-          void refineDraft($, used, () => sends !== at)
+          void refineDraft($, used, () => sends !== at || count.era !== era)
             .catch(() => undefined)
             .then(done => {
-              if (done === 'stale') $.ui.toast('The draft changed or was sent during the review; press Refine again')
+              if (done === 'stale') $.ui.toast('The draft changed, was sent or was cleared during the review; press Refine again')
               else if (done === undefined) $.ui.toast('Review failed; the prompt was not changed')
               else if (done !== 'empty') {
                 result = { ...done, plan: used.workflow === 'plan', expanded: false }
@@ -827,13 +891,13 @@ export const register: Register = (on, options) => {
     }
 
     const last = result
-    const count = last.issues.length
+    const found = last.issues.length
     const row = h(
       Box,
       { key: 'result', ...ROW },
       label,
-      h(Text, null, count ? `Refined: ${count} issue${count === 1 ? '' : 's'}` : 'Refined: no issues'),
-      count
+      h(Text, null, found ? `Refined: ${found} issue${found === 1 ? '' : 's'}` : 'Refined: no issues'),
+      found
         ? h(Button, {
             key: 'show-issues',
             label: last.expanded ? 'Hide issues' : 'Show issues',
@@ -887,11 +951,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     // Read before any slash command is typed, whose record in the transcript would otherwise count as a prompt.
-    if (sent === undefined) {
-      const at = era
-      const n = await readPrompts($, compacted)
-      if (era === at) sent ??= n
-    }
+    await seedCount($, count)
     await $.command.register({
       name: 'refine-prompt',
       description: 'Review a prompt and put an improved one in the prompt box',
@@ -924,18 +984,10 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, pass) => {
     // A prompt the person sent that entered the session counts on the status row; a dropped one does not.
     const counts = isSent(e)
-    if (sent === undefined) {
-      const at = era
-      const n = await readPrompts($, compacted)
-      if (era === at) sent ??= n
-    }
+    await seedCount($, count)
     const next = async (x: PromptSubmitInput) => {
       const r = await pass(x)
-      if (counts && sent !== undefined && r.drop === undefined) {
-        sent++
-        // The row shows the new count now, not only when the turn ends.
-        $.ui.invalidate('ui.render')
-      }
+      if (counts && r.drop === undefined) countSent($, count)
       return r
     }
     // A send closes the band's result row, and ends any band review running.
@@ -961,7 +1013,7 @@ export const register: Register = (on, options) => {
     // The prompt count, not the transcript's turns: a slash command typed first is a user turn there. A compaction's summarized prompts
     // are in it too, since the conversation goes on and its next prompt is not a first one.
     // A count that could not be read skips the rating, as a failed read did before: a later prompt is not taken for a first one.
-    if (!cleared && (sent === undefined || sent > 0)) return next(e)
+    if (!cleared && (count.sent === undefined || count.sent > 0)) return next(e)
     cleared = false
     // A new first prompt (as after /clear) ends the earlier decision's tracking, even when this one is not rated.
     tracked = undefined
@@ -973,7 +1025,8 @@ export const register: Register = (on, options) => {
     // Dismissing and handing off change nothing here, so they are logged as chosen and the prompt goes on. Refining is not logged:
     // the rewrite is rated and logged when it is sent, and one prompt should count once.
     if (dismissed || answer === NEW_SESSION) {
-      tracked = await record($, { rating, from: onModel(current), to: onModel(current), chose: dismissed ? 'dismissed' : NEW_SESSION }, sent)
+      const model = onModel(override, current)
+      tracked = await record($, { rating, from: model, to: model, chose: dismissed ? 'dismissed' : NEW_SESSION }, count.sent)
     }
     if (dismissed) return next(e)
     if (answer === NEW_SESSION) return next({ ...e, context: [...(e.context ?? []), HANDOFF] })
@@ -984,22 +1037,20 @@ export const register: Register = (on, options) => {
       const reviewed = await improve($, e.text, STRONG.includes(rating) && stored.goal === 'auto' ? { ...stored, goal: 'check' } : stored)
       if (reviewed !== undefined) return { drop: asLine(reviewed) }
       // No rewrite will come back to be rated, so this is the session's one entry.
-      tracked = await record($, { rating, from: onModel(current), to: onModel(current), chose: REFINE }, sent)
+      const model = onModel(override, current)
+      tracked = await record($, { rating, from: model, to: model, chose: REFINE }, count.sent)
       return next(e)
     }
 
-    const decided = decide(rating, current, answer)
-    if (decided.status) $.ui.status(line())
-    tracked = await record($, decided.entry, sent)
+    const decided = decide(override, rating, current, answer)
+    if (decided.status) $.ui.status(overrideLine(override))
+    tracked = await record($, decided.entry, count.sent)
     return next(e)
   }).catch(async ($, e, next) => {
     // A failure here never holds up the prompt. One that failed before `next` ran sends it here, so it is counted here too.
     if (next.called) return next(e)
     const r = await next(e)
-    if (isSent(e) && sent !== undefined && r.drop === undefined) {
-      sent++
-      $.ui.invalidate('ui.render')
-    }
+    if (isSent(e) && r.drop === undefined) countSent($, count)
     return r
   })
 
@@ -1017,11 +1068,11 @@ export const register: Register = (on, options) => {
     const usage = await $.session.usage().catch(() => undefined)
     const now = usage?.cost?.usd
     // Prompts sent since the decision, so a slash command's record in the transcript adds none.
-    const count = sent === undefined || t.turns0 === undefined ? undefined : sent - t.turns0
+    const prompts = count.sent === undefined || t.turns0 === undefined ? undefined : count.sent - t.turns0
     const read: Spend = {
       // Down to four places, so the figure never exceeds /cost; the 1e-6 keeps 0.19999999999999998 from storing as 0.1999.
       cost: now === undefined ? undefined : Math.floor((now - t.base) * 1e4 + 1e-6) / 1e4,
-      prompts: count,
+      prompts,
       // Absent until the first response of the live window.
       ctx: usage?.context.percent,
       effort: ran,
@@ -1045,10 +1096,15 @@ export const register: Register = (on, options) => {
     tracked = undefined
     ran = undefined
     cleared = e.reason === 'clear'
-    compacted = 0
-    // /clear starts an empty conversation; /resume and /branch move to one whose count is read afresh.
-    sent = cleared ? 0 : undefined
-    era++
+    endCount(count, cleared)
+    // The next first prompt after /clear is rated afresh, so the cleared conversation's override, effort and spent Refine offer
+    // end here; a Keep on that prompt then runs the session's own model. /resume and /branch go on with the same work and keep them.
+    // A Refine result row closes too: the Manage context button's /clear sends no prompt, so the send that closes it never comes.
+    if (cleared) {
+      improved = false
+      result = undefined
+      if (endOverride(override)) $.ui.status(overrideLine(override))
+    }
     // The status row drops the ended conversation's figures, which no prompt edit redraws under band never.
     $.ui.invalidate('ui.render')
     return next(e)
@@ -1068,7 +1124,7 @@ export const register: Register = (on, options) => {
     const before = await $.session.turns().catch(() => undefined)
     const r = await next(e)
     const after = await $.session.turns().catch(() => undefined)
-    if (before !== undefined && after !== undefined && after < before) compacted += before - after
+    if (before !== undefined && after !== undefined && after < before) count.compacted += before - after
     $.ui.invalidate('ui.render')
     return r
   }).catch(($, e, next) => next(e))
@@ -1076,13 +1132,9 @@ export const register: Register = (on, options) => {
   // ponytail: rewrites each request rather than running /model, which cannot run while the prompt waits on this hook
   on('turn.step', async function* ($, e, next) {
     if (e.agentId) return yield* next(e)
-    // ponytail: only named levels are compared; an integer budget, or a model without effort, is left alone
-    const change =
-      effort !== undefined && typeof e.effort === 'string' && (exact ? e.effort !== effort : LEVELS.indexOf(e.effort) < LEVELS.indexOf(effort))
-    if (change && !raised) {
-      raised = true
-      $.ui.status(line())
-    }
+    const { change, show } = stepEffort(override, e.effort)
+    if (show) $.ui.status(overrideLine(override))
+    const { model, effort } = override
     // Recorded after the mod's own change, so the entry holds what the request ran at, not what the session asked for.
     const sent = change ? effort : e.effort
     ran = typeof sent === 'string' ? sent : undefined
@@ -1093,6 +1145,7 @@ export const register: Register = (on, options) => {
   // Only the built-in Explore (the engine provides it; a plugin's or the person's agent of that name is left alone), a new run (a resumed
   // one is pinned), no teammate, and a spawn that names no model of its own.
   on('agent.spawn', ($, e, next) => {
+    const { model } = override
     const up = model !== undefined && (rank(model) ?? 0) >= RANK.opus!
     const builtIn = e.provider === undefined || e.provider.plugin === 'engine'
     if (!up || !builtIn || e.subagentType !== 'Explore' || e.model !== undefined || e.resume || e.isTeammate) return next(e)
@@ -1101,16 +1154,15 @@ export const register: Register = (on, options) => {
 
   // The person's own /model wins from then on.
   on('command.run', { command: 'model' }, ($, e, next) => {
-    model = running = undefined
-    $.ui.status(line())
+    dropModel(override)
+    $.ui.status(overrideLine(override))
     return next(e)
   }).catch(($, e, next) => next(e))
 
   // Likewise the person's own /effort, leaving any model override in place.
   on('command.run', { command: 'effort' }, ($, e, next) => {
-    effort = undefined
-    exact = raised = false
-    $.ui.status(line())
+    dropEffort(override)
+    $.ui.status(overrideLine(override))
     return next(e)
   }).catch(($, e, next) => next(e))
 }

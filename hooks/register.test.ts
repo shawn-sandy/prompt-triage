@@ -5,6 +5,8 @@ import type {
   ModelCompleteInput,
   On,
   PromptOrigin,
+  PromptChangeInput,
+  PromptEditInput,
   PromptSubmitInput,
   RenderElement,
   RenderSurface,
@@ -37,6 +39,8 @@ type Setup = {
   storeReadFails?: boolean
   /** Runs as each review call starts, as the person typing during the review would. */
   onReview?: () => void
+  /** Runs, and is awaited, as each `$.prompt.fill()` call starts, as a /clear landing while the fill is pending would. */
+  onFill?: () => Promise<unknown> | void
   /** The session's cost in US dollars, or one reading per `$.session.usage()` call in order; undefined leaves `cost` out. */
   usd?: number | number[]
   /** Every `$.session.usage()` call rejects. */
@@ -226,7 +230,8 @@ function engine(on: On, s: Setup) {
   })
   // The engine resolves each path against the working directory, so a listed path matches by its end.
   on('fs.exists', (_$, e) => ({ value: Array.isArray(s.exists) ? s.exists.some(p => e.path.endsWith(`/${p}`)) : (s.exists ?? true) }))
-  on('prompt.fill', (_$, e) => {
+  on('prompt.fill', async (_$, e) => {
+    await s.onFill?.()
     filled.push(e.text)
     return { isFilled: s.isFilled ?? true }
   })
@@ -990,6 +995,44 @@ test('the band shows only for a draft that is not empty, not a slash command and
   }
 })
 
+/**
+ * The prompt box's own events, raised as the editor raises them. The test kit runs them on `$.prompt`, but its declarations list
+ * neither as a call there, so this one cast is where the tests reach them.
+ */
+const editor = ($: Engine) =>
+  $.prompt as unknown as { edit: (e: PromptEditInput) => Promise<unknown>; change: (e: PromptChangeInput) => Promise<unknown> }
+
+// Typing redraws the band only when the show rule's answer flips, not on every key.
+test('an edit redraws the band only when the draft starts or stops meeting the show rule', async ($, on) => {
+  const seen = engine(on, {})
+  // The editor beneath the plugin applies the splice, as core does.
+  on('prompt.edit', (_$, e) => ({ text: e.text.slice(0, e.start) + e.inputText + e.text.slice(e.end), cursor: e.start + e.inputText.length }))
+  const edit = (text: string, inputText: string) =>
+    editor($).edit({ origin: { kind: 'composer' }, text, cursor: text.length, start: text.length, end: text.length, inputText })
+
+  const before = seen.redraws()
+  await edit('', LONG)
+  expect(seen.redraws()).toBe(before + 1)
+  await edit(LONG, '!')
+  expect(seen.redraws()).toBe(before + 1)
+  await edit('', 'Fix it')
+  expect(seen.redraws()).toBe(before + 2)
+})
+
+test('a change to the box from outside an edit redraws the band only when the show rule flips', async ($, on) => {
+  const seen = engine(on, {})
+  on('prompt.change', (_$, e) => ({ text: e.text }))
+  const change = (text: string) => editor($).change({ text, cursor: text.length, origin: { kind: 'history' } })
+
+  const before = seen.redraws()
+  await change(LONG)
+  expect(seen.redraws()).toBe(before + 1)
+  await change(`${LONG} again`)
+  expect(seen.redraws()).toBe(before + 1)
+  await change('')
+  expect(seen.redraws()).toBe(before + 2)
+})
+
 test('band: always shows a short draft', { options: { band: 'always' } }, async ($, on) => {
   engine(on, { draft: 'Fix the typo' })
   expect(await hasPickers(await band($))).toBe(true)
@@ -1088,6 +1131,44 @@ test('Done closes the result row without touching the prompt box', async ($, on)
   await ui.press({ key: 'done' })
   expect(seen.filled.length).toBe(1)
   expect(await hasPickers(ui)).toBe(true)
+})
+
+// The Manage context button runs /clear with no prompt.submit, so the send that closes the row never comes.
+test("a /clear closes the result row, so Restore original cannot put back the cleared conversation's draft", async ($, on) => {
+  engine(on, { draft: LONG, review: REVIEWED })
+  await refine(await band($))
+  expect(await (await band($)).find({ key: 'result' })).toBeDefined()
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  expect(await (await band($)).find({ key: 'result' })).toBeUndefined()
+})
+
+// The review runs from a timer, so a /clear can land while it is still running; its finish must not undo the /clear's reset.
+test('a /clear during a band Refine drops that review: no fill, no result row, and Refine prompt is offered again', async ($, on) => {
+  const seen = engine(on, { draft: LONG, review: REVIEWED, answer: 'Keep claude-sonnet-5-5' })
+  const ui = await band($)
+  await ui.press({ key: 'refine' })
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  await settle()
+  expect(seen.filled).toEqual([])
+  expect(await (await band($)).find({ key: 'result' })).toBeUndefined()
+  await submit($, 'Redesign the auth layer')
+  expect(seen.asked.length).toBe(1)
+  expect(seen.asked[0]).toContain('Refine prompt')
+})
+
+test('a /clear that lands while the band Refine fills the box brings back neither its result row nor a spent Refine offer', async ($, on) => {
+  const s: Setup = { draft: LONG, review: REVIEWED, answer: 'Keep claude-sonnet-5-5' }
+  const seen = engine(on, s)
+  // Only the first fill: the clear runs once, mid-fill, after the review's own stale check passed.
+  s.onFill = () => {
+    s.onFill = undefined
+    return $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  }
+  await refine(await band($))
+  expect(await (await band($)).find({ key: 'result' })).toBeUndefined()
+  await submit($, 'Redesign the auth layer')
+  expect(seen.asked.length).toBe(1)
+  expect(seen.asked[0]).toContain('Refine prompt')
 })
 
 test('Plan first notes in the result row that Shift+Tab cycles to plan mode', async ($, on) => {
@@ -1445,6 +1526,20 @@ test('free text naming no model is logged as other', async ($, on) => {
   expect((seen.store.decisions as Decision[])[0]?.chose).toBe('other')
 })
 
+test('Keep is logged as its label when the model name has spaces', async ($, on) => {
+  const seen = engine(on, { rating: 'moderate', model: 'Default (recommended)', answer: 'Keep Default (recommended)' })
+
+  await submit($, 'Add a retry limit to the upload client')
+  expect((seen.store.decisions as Decision[])[0]?.chose).toBe('Keep Default (recommended)')
+})
+
+test('free text under Other that starts with Keep and names another model is logged as other, not as Keep', async ($, on) => {
+  const seen = engine(on, { answer: 'Keep opus' })
+
+  await submit($, 'Redesign the auth layer')
+  expect((seen.store.decisions as Decision[])[0]).toEqual(expect.objectContaining({ to: 'opus', chose: 'other: opus' }))
+})
+
 test('a failed store read never lets the next write replace the log', async ($, on) => {
   const old: Decision[] = [{ rating: 'simple', from: 'x', to: 'x', chose: 'old' }]
   const seen = engine(on, { answer: 'Switch to opus', store: { decisions: old }, storeReadFails: true })
@@ -1667,6 +1762,55 @@ test('the next prompt after /resume is not rated, since it continues a conversat
   await submit($, 'Redesign the billing layer')
   expect(seen.ratings.length).toBe(1)
   expect((seen.store.decisions as Decision[]).length).toBe(1)
+})
+
+// A /clear starts a new conversation, so the cleared one's model override, effort and spent Refine offer do not carry into it.
+test('a /clear ends the model override, so a Keep on the next first prompt runs the session model', async ($, on) => {
+  const seen = engine(on, { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'] })
+
+  await submit($, 'Redesign the auth layer')
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  await submit($, 'Redesign the billing layer')
+  await step($)
+  expect(seen.steps.map(x => x.model)).toEqual(['claude-sonnet-5-5'])
+  expect(seen.status.at(-1)).toBeUndefined()
+  expect((seen.store.decisions as Decision[]).at(-1)).toEqual(expect.objectContaining({ from: 'claude-sonnet-5-5', to: 'claude-sonnet-5-5' }))
+})
+
+test('a /clear ends the effort minimum, even when the next first prompt is not rated', async ($, on) => {
+  const s: Setup = { answer: 'Keep claude-sonnet-5-5' }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await step($, undefined, 'low')
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  s.rating = undefined
+  await submit($, 'Redesign the billing layer')
+  await step($, undefined, 'low')
+  expect(seen.steps.map(x => x.effort)).toEqual(['medium', 'low'])
+  expect(seen.status.at(-1)).toBeUndefined()
+})
+
+test('a /clear offers Refine prompt again on the next first prompt after one was refined', async ($, on) => {
+  const seen = engine(on, { answer: ['Refine prompt', 'Keep claude-sonnet-5-5'], review: REVIEWED })
+
+  await submit($, 'Redesign the auth layer')
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  await submit($, 'Redesign the billing layer')
+  // Two dialogs, so the one checked is the second prompt's and not the first's, which offered Refine too.
+  expect(seen.asked.length).toBe(2)
+  expect(seen.asked.at(-1)).toContain('Refine prompt')
+})
+
+test('a /resume keeps the model override: only a /clear starts afresh', async ($, on) => {
+  const s: Setup = { answer: 'Switch to opus' }
+  const seen = engine(on, s)
+
+  await submit($, 'Redesign the auth layer')
+  await $.session.end({ reason: 'resume', sessionId: 'ended', resume: { id: 'next' } })
+  s.turns = 3
+  await step($)
+  expect(seen.steps.map(x => x.model)).toEqual(['opus'])
 })
 
 test('an entry pushed out by the cap is not added back', async ($, on) => {
