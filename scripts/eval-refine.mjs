@@ -43,8 +43,9 @@ async function review(prompt, cwd) {
   const { stdout } = await run('claude', args, { env, cwd, maxBuffer: 16 * 1024 * 1024, timeout: 60_000 })
   const out = JSON.parse(stdout.slice(stdout.indexOf('{')))
   const reply = out.result ?? ''
-  // An error payload or a reply with neither tag asked nothing, so it would pass vacuously; fail the script instead.
-  if (out.is_error || !/<(issues|question)>/.test(reply)) throw new Error(`no review in the reply: ${reply.slice(0, 200)}`)
+  // The mod's review() drops a reply with no <prompt> rewrite, and an error payload or a cut-off reply would score clean on no lines,
+  // so either one fails the script instead.
+  if (out.is_error || !reply.match(/<prompt>([\s\S]*?)<\/prompt>/)?.[1]?.trim()) throw new Error(`no review in the reply: ${reply.slice(0, 200)}`)
   return reply
 }
 
