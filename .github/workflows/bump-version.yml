@@ -2,8 +2,8 @@ name: bump-version
 
 # Opens a pull request that bumps plugin.json when the mod's code changes on main:
 # minor when a pushed commit subject starts with `feat:` or `feat(scope):`, patch otherwise.
-# main requires a reviewed pull request, so the bump goes through one. release-version tags and
-# publishes the release when that pull request merges.
+# main requires a pull request (0 approvals, no required checks), so the bump goes through one and
+# this job squash-merges it. release-version tags and publishes the release when it merges.
 # Installed users only get an update when `version` changes, so each merged change must bump it.
 # The bump branch touches only plugin.json, which is outside `paths`, so it does not re-trigger.
 # This file is in `paths` so a change to the release flow is exercised by its own merge.
@@ -70,3 +70,6 @@ jobs:
             | while read -r number; do
               gh pr close "$number" --comment "Superseded by $branch."
             done
+          # Nothing blocks this pull request (no required approvals or checks), so --auto would be refused;
+          # merge it now. The app token, not GITHUB_TOKEN, so the merge triggers release-version.
+          gh pr merge "$branch" --squash
