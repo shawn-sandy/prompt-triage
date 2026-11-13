@@ -1,4 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
+import { REVIEWER } from './register.ts'
 import type { Engine } from 'claude-code/testing'
 import type {
   AgentSpawnInput,
@@ -517,6 +518,15 @@ test('improving asks the questions only the person can answer, then rewrites wit
   expect(seen.reviewed[1]).toContain('Which files should the review cover? Hook code')
   expect(seen.filled).toEqual(['Review hooks/register.ts.'])
   expect(result.drop).not.toContain('Placeholders left unfilled')
+})
+
+// The wording of the reviewer's rules is scored by scripts/eval-refine.mjs against a model; this only checks that the whole prompt is what each call sends.
+test('the reviewer prompt is what both review calls send, the first and the one with answers', async ($, on) => {
+  const seen = engine(on, { answer: 'Hook code', review: [ASKS, ANSWERED] })
+
+  await command($, 'refine-prompt', 'Review the workflow. [Specify the files.]')
+  expect(seen.reviews).toHaveLength(2)
+  for (const r of seen.reviews) expect(r.system).toContain(REVIEWER)
 })
 
 test('dismissing a question stops the questions and keeps the first rewrite', async ($, on) => {
