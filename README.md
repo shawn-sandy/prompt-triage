@@ -216,7 +216,7 @@ sending it. One call to `haiku` reviews it for a missing goal, scope or
 done-criteria, ambiguity, contradictions and unfilled placeholders such as
 `[Specify the files]`, and rewrites it to fix them.
 
-When the fix needs a fact only you know, such as which files are in scope, the
+When the fix needs a fact only you know, such as what counts as done or which of two designs you want, the
 review asks you first: up to three questions, one dialog each, with likely
 answers to pick or your own under "Other". It is told that the agent running
 the prompt can read the repo and run commands, and not to ask about, or list as

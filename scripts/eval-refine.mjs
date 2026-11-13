@@ -7,7 +7,8 @@
  *   node scripts/eval-refine.mjs --runs 10  each case 10 times, since one run varies: the unfixed reviewer asked the RELEASING.md
  *                                           case's forbidden question in 4 of 10 runs, so a few runs can all come back clean
  *
- * A case passes a run when no question's first line and no issue line matches its `forbid` pattern. The rewrite is not read.
+ * A case passes a run when no question's first line and no issue line matches its `forbid` pattern, and, if it has a
+ * `require` pattern, at least one such line matches it. The rewrite is not read.
  * Imports REVIEWER from the mod, so it scores the exact text sent, with the pickers at their defaults.
  * ponytail: the patterns name questions seen in past runs, so a new phrasing of the same mistake slips past; add its pattern to the case.
  */
@@ -36,7 +37,11 @@ async function review(prompt) {
   ]
   const env = { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' }
   const { stdout } = await run('claude', args, { env, cwd: tmpdir(), maxBuffer: 16 * 1024 * 1024, timeout: 60_000 })
-  return JSON.parse(stdout.slice(stdout.indexOf('{'))).result ?? ''
+  const out = JSON.parse(stdout.slice(stdout.indexOf('{')))
+  const reply = out.result ?? ''
+  // An error payload or a reply with neither tag asked nothing, so it would pass vacuously; fail the script instead.
+  if (out.is_error || !/<(issues|question)>/.test(reply)) throw new Error(`no review in the reply: ${reply.slice(0, 200)}`)
+  return reply
 }
 
 /** What the reviewer puts to the person or lists as a problem: each question's first line and each issue line. */
@@ -47,10 +52,15 @@ function asked(reply) {
 }
 
 let failed = false
-for (const { prompt, forbid } of cases) {
-  const pattern = new RegExp(forbid, 'i')
+for (const { prompt, forbid, require } of cases) {
   const replies = await Promise.all(Array.from({ length: runs }, () => review(prompt)))
-  const hits = replies.map(r => asked(r).filter(line => pattern.test(line)))
+  // forbid: lines that must not appear. require: at least one line must match, so a reviewer gone silent fails.
+  const hits = replies.map(r => {
+    const lines = asked(r)
+    const bad = forbid ? lines.filter(line => new RegExp(forbid, 'i').test(line)) : []
+    if (require && !lines.some(line => new RegExp(require, 'i').test(line))) bad.push(`(nothing matched require /${require}/)`)
+    return bad
+  })
   const bad = hits.filter(h => h.length).length
   console.log(`${bad ? 'FAIL' : 'ok  '} ${runs - bad}/${runs} runs clean: ${prompt.slice(0, 70)}`)
   for (const line of hits.flat()) console.log(`       asked: ${line}`)
