@@ -39,6 +39,8 @@ type Setup = {
   storeReadFails?: boolean
   /** Runs as each review call starts, as the person typing during the review would. */
   onReview?: () => void
+  /** Runs, and is awaited, as each `$.prompt.fill()` call starts, as a /clear landing while the fill is pending would. */
+  onFill?: () => Promise<unknown> | void
   /** The session's cost in US dollars, or one reading per `$.session.usage()` call in order; undefined leaves `cost` out. */
   usd?: number | number[]
   /** Every `$.session.usage()` call rejects. */
@@ -228,7 +230,8 @@ function engine(on: On, s: Setup) {
   })
   // The engine resolves each path against the working directory, so a listed path matches by its end.
   on('fs.exists', (_$, e) => ({ value: Array.isArray(s.exists) ? s.exists.some(p => e.path.endsWith(`/${p}`)) : (s.exists ?? true) }))
-  on('prompt.fill', (_$, e) => {
+  on('prompt.fill', async (_$, e) => {
+    await s.onFill?.()
     filled.push(e.text)
     return { isFilled: s.isFilled ?? true }
   })
@@ -1147,6 +1150,21 @@ test('a /clear during a band Refine drops that review: no fill, no result row, a
   await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
   await settle()
   expect(seen.filled).toEqual([])
+  expect(await (await band($)).find({ key: 'result' })).toBeUndefined()
+  await submit($, 'Redesign the auth layer')
+  expect(seen.asked.length).toBe(1)
+  expect(seen.asked[0]).toContain('Refine prompt')
+})
+
+test('a /clear that lands while the band Refine fills the box brings back neither its result row nor a spent Refine offer', async ($, on) => {
+  const s: Setup = { draft: LONG, review: REVIEWED, answer: 'Keep claude-sonnet-5-5' }
+  const seen = engine(on, s)
+  // Only the first fill: the clear runs once, mid-fill, after the review's own stale check passed.
+  s.onFill = () => {
+    s.onFill = undefined
+    return $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  }
+  await refine(await band($))
   expect(await (await band($)).find({ key: 'result' })).toBeUndefined()
   await submit($, 'Redesign the auth layer')
   expect(seen.asked.length).toBe(1)
