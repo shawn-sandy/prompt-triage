@@ -91,8 +91,24 @@ desktop app it can also hand a complex or long-running task to a new session.
    got and the effort it ran at, and `/triage-stats` prints the tally. See
    [The decision log](#the-decision-log).
 
-The switch applies to the main conversation's requests for the rest of the
-session; subagents keep their own models, with one exception: after a switch
+The switch moves the whole session from its first prompt: the main
+conversation's requests, and Claude Code's background requests (compaction,
+`/recap` and prompt suggestions). Claude Code builds those on the session's
+own model, so without the move each one would cache the whole conversation
+again at that model's price. The mod moves a background request by rewriting
+the model it names just before it is sent, rather than by running `/model`,
+because a `/model` a plugin runs also saves that model as your default for new
+sessions. It has three limits. `/cost` and the decision log still price a moved
+request at the session model's rate, so they overstate a switched session's
+spend. A session on `haiku` that switches up leaves its haiku requests alone,
+since Claude Code runs its own small helper requests on haiku too. Where your
+organization's guard mod loads, Claude Code shows its requests only to the
+organization's own mods, so there background requests stay on the session's
+model.
+
+A subagent's requests on the session model's family move with the session,
+whether it inherits the session's model or is pinned to that family. Subagents
+on any other model keep it, with one exception: after a switch
 up to `opus` or `fable`, the built-in Explore subagent runs on `haiku` when
 the request that starts it names no model of its own. Exploration is read-only
 and cheap to check, and would otherwise run at the pricier model's rate. A
@@ -325,7 +341,10 @@ The figures update whenever the engine reports the cost or context moved,
 after each turn, and after `/clear` and a compaction. Below 25% context, or before a fresh conversation's first
 response, the row draws no button, since nothing needs clearing. From 25% the
 button appears. Pressing it opens a dialog that offers both, recommending **Clear** below
-60% context and **Compact** from 60%: **Compact**
+60% context and **Compact** from 60%. Both cutoffs are measured against at most
+200,000 tokens, so on a 1M window the button appears at 50,000 tokens and Compact is
+recommended from 120,000, rather than at 250,000 and 600,000, since each turn
+re-reads the whole context. The row still shows the reported percent. **Compact**
 keeps a summary to go on with the task, and **Clear** starts fresh for an
 unrelated one. The choice runs `/compact` or `/clear` once the session is idle.
 Closing the dialog runs nothing. The row shows whatever the `band` setting is.
@@ -390,6 +409,14 @@ A `simple` prompt gets the label only. Each **Refine prompt**,
 `/refine-prompt` or band **Refine** adds one `haiku` request, and a second when
 you answer its questions. The band makes no request while you type. `/triage-stats` makes no model
 request at all.
+
+The `haiku` alias is not always Haiku 5.5. Per
+[Which Claude model should you build with?](https://claude.dev/blog/which-claude-model-should-you-build-with/),
+it resolves to Haiku 5.5 on the Anthropic API from Claude Code v2.1.293, and
+still to Haiku 4.5 on Bedrock, Google Cloud, Microsoft Foundry and Claude
+Platform on AWS. The rating, **Refine prompt** and the Explore override all name
+`haiku`, so on those providers they run on the older model. The rating eval's
+scores were measured through the Anthropic API and are not a measure of Haiku 4.5.
 
 ## Limits
 

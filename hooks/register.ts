@@ -19,6 +19,8 @@ const ALIASES = ['haiku', 'sonnet', 'opus', 'fable'] as const
 const RANK: Record<string, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3, mythos: 3 }
 /** The model's rank, or undefined for a name that holds no known family, such as "Default (recommended)". */
 const rank = (model: string) => Object.entries(RANK).find(([family]) => model.toLowerCase().includes(family))?.[1]
+/** The model's family, a RANK key, or undefined; unlike rank() it tells apart families that share a tier (Fable and Mythos). */
+const familyOf = (model: string) => Object.keys(RANK).find(family => model.toLowerCase().includes(family))
 /** A tier gap in words, for the dialog; RANK spans 0 to 3, so a gap never passes three. */
 const COUNT = ['zero', 'one', 'two', 'three']
 /** The store key under which the mod logs each model and effort decision, and how many entries it keeps. */
@@ -138,6 +140,13 @@ const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
 // auto-compact window is not read (only a usage breakdown carries it); tune these, or read it, if the button shows too early or late.
 const CLEAR_AT = 25
 const COMPACT_AT = 60
+// The percents are measured against at most this many tokens. Every turn re-reads the whole context, and the window is now 1M on every
+// model, where 25% and 60% would mean 250K and 600K tokens: far past where the re-read cost matters. 200K keeps the old window's cutoffs.
+// ponytail: one fixed cap; read the model's own cost per token instead if the cutoffs need to follow price.
+const WINDOW_CAP = 200_000
+/** The fill the thresholds compare: the reported percent, or the tokens as a share of WINDOW_CAP when that is more. */
+const weight = (percent: number | undefined, tokens: number | undefined): number | undefined =>
+  tokens === undefined ? percent : Math.max(percent ?? 0, Math.round((tokens / WINDOW_CAP) * 100))
 const CLEAR = 'Clear'
 /** Token counts as the row shows them: 48.2K, 1.2M. */
 const COMPACT_NUMBER = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
@@ -149,8 +158,8 @@ const COMPACT = 'Compact'
  * command loses or rewrites the conversation. `$.ui.ask` answers a typed label the same as a picked one, so typing a label in full,
  * "Clear (recommended)" included, runs it; a bare "Clear" when Clear is the recommended option is not a label and runs nothing.
  */
-async function tidy($: EngineInterface, percent: number | undefined): Promise<void> {
-  const first = (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR
+async function tidy($: EngineInterface, percent: number | undefined, tokens: number | undefined): Promise<void> {
+  const first = (weight(percent, tokens) ?? 0) >= COMPACT_AT ? COMPACT : CLEAR
   const options = [`${first} (recommended)`, first === COMPACT ? CLEAR : COMPACT]
   const fill = percent === undefined ? '' : `Context is ${percent}% full. `
   const answer = await $.ui
@@ -652,11 +661,20 @@ function endCount(c: Count, cleared: boolean): void {
 
 /**
  * The main loop's model and effort override, and the status line that names it. Changed only by the functions below.
- * `model` is the model the person picked; undefined leaves the session's own. `effort` is the least effort the main loop runs at,
- * or with `exact` the effort it runs at; undefined leaves the session's own. `running` and `raised` are the status line's parts:
- * the model override, and the effort once a request was changed.
+ * `model` is the model the person picked; undefined leaves the session's own. `from` is the session's model the switch left, and
+ * `sendAs` the picked model's full id, read once off the first main-loop request that named it, for retarget(). `effort` is the least effort the
+ * main loop runs at, or with `exact` the effort it runs at; undefined leaves the session's own. `running` and `raised` are the status
+ * line's parts: the model override, and the effort once a request was changed.
  */
-type Override = { model?: string; running?: string; effort?: ModelEffort; exact: boolean; raised: boolean }
+export type Override = {
+  model?: string
+  from?: string
+  sendAs?: string
+  running?: string
+  effort?: ModelEffort
+  exact: boolean
+  raised: boolean
+}
 
 /** The status line the override shows, or undefined when it shows none. */
 const overrideLine = (o: Override) =>
@@ -669,7 +687,7 @@ const onModel = (o: Override, current: string) => o.model ?? current
  * Applies the person's answer to a model dialog: the effort the rating sets (or exactly low) and the model the answer names.
  * Returns the decision to log, and whether the status line changed and needs showing.
  */
-function decide(o: Override, rating: Rating, current: string, answer: string | undefined): { entry: Decision; status: boolean } {
+export function decide(o: Override, rating: Rating, current: string, answer: string | undefined): { entry: Decision; status: boolean } {
   const chose = answer === undefined ? 'none asked' : chosen(answer, current)
   const from = onModel(o, current)
   // A prompt rated again (the improved one, say) replaces the minimum, so the status is shown afresh.
@@ -681,6 +699,8 @@ function decide(o: Override, rating: Rating, current: string, answer: string | u
   const picked = answer === keep(current) ? undefined : pickedModel(answer)
   if (picked) {
     o.model = picked
+    o.from = current
+    o.sendAs = undefined
     // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.
     o.running = `running ${picked}, not ${current}`
     status = true
@@ -702,8 +722,8 @@ function stepEffort(o: Override, level: TurnStepInput['effort']): { change: bool
 }
 
 /** The person's own /model: the model override ends, any effort override stays. */
-function dropModel(o: Override): void {
-  o.model = o.running = undefined
+export function dropModel(o: Override): void {
+  o.model = o.running = o.from = o.sendAs = undefined
 }
 
 /** The person's own /effort: the effort override ends, any model override stays. */
@@ -713,11 +733,44 @@ function dropEffort(o: Override): void {
 }
 
 /** Ends the whole override, as a /clear does; true when a status line was showing and now needs clearing. */
-function endOverride(o: Override): boolean {
+export function endOverride(o: Override): boolean {
   const showing = overrideLine(o) !== undefined
   dropModel(o)
   dropEffort(o)
   return showing
+}
+
+/**
+ * The body to send an engine model request with instead, or undefined to send it as built. Claude Code builds its background
+ * requests (compaction, /recap, prompt suggestions) on the session's own model and turn.step never sees them, so after a switch they
+ * would cache the whole conversation again on the model the person left. A request on the left model's family is moved to the picked
+ * model's full id, which the main loop's first request already carries (turn.step moved it); one on any other family is left alone.
+ * This also moves a subagent that inherits the session's model, as a real /model would; Explore keeps its haiku (agent.spawn).
+ * ponytail: matched by family, so an agent pinned to the left model's family moves too; a per-request origin would tell them apart.
+ * ponytail: a session on haiku is never rewritten, since the engine runs its own small helper requests on haiku and the family cannot
+ * tell them from background ones; those re-cache at haiku's price, the cheapest, so a switch up leaves them.
+ */
+export function retarget(o: Override, body: unknown): string | undefined {
+  if (o.model === undefined || o.from === undefined || typeof body !== 'string') return undefined
+  let request: { model?: unknown; tools?: unknown }
+  try {
+    request = JSON.parse(body)
+  } catch {
+    return undefined
+  }
+  const { model } = request
+  if (typeof model !== 'string') return undefined
+  const family = familyOf(model)
+  if (family !== undefined && family === familyOf(o.model)) {
+    // The first main-loop request names the id, and it stays: a later request in that family (an engine helper on an older id, a
+    // subagent pinned to one) must not redirect background requests. Helpers carry no tools; the main loop always does.
+    // ponytail: a main loop run with no tools never names one, so its background requests stay on the left model
+    if (o.sendAs === undefined && Array.isArray(request.tools) && request.tools.length > 0) o.sendAs = model
+    return undefined
+  }
+  const left = familyOf(o.from)
+  if (o.sendAs === undefined || left === undefined || left === 'haiku' || family !== left) return undefined
+  return JSON.stringify({ ...request, model: o.sendAs })
 }
 
 export const register: Register = (on, options) => {
@@ -791,7 +844,7 @@ export const register: Register = (on, options) => {
               .join(' · ')}`,
           ),
           // An unknown fill (a fresh window, before its first response) counts as empty.
-          (percent ?? 0) < CLEAR_AT
+          (weight(percent, tokens) ?? 0) < CLEAR_AT
             ? null
             : h(Button, {
                 key: 'tidy',
@@ -805,7 +858,7 @@ export const register: Register = (on, options) => {
                   $.clock.after(
                     0,
                     () =>
-                      void tidy($, percent)
+                      void tidy($, percent, tokens)
                         .catch(() => $.ui.toast('Clear or compact failed'))
                         .finally(() => {
                           tidying = false
@@ -993,14 +1046,15 @@ export const register: Register = (on, options) => {
       if (counts && r.drop === undefined) countSent($, count)
       return r
     }
-    // A send closes the band's result row, and ends any band review running.
+    // A slash command, a hidden prompt or a delivery (a schedule, a task, a plugin's own message) is not the person's prompt to rate.
+    if (!isSent(e)) return next(e)
+    // The person's own send closes the band's result row, and ends any band review running; a delivery, which can arrive at any
+    // time, does neither, or it would drop the rewrite and Restore original.
     sends++
     if (result) {
       result = undefined
       $.ui.invalidate('ui.render')
     }
-    // A slash command, a hidden prompt or a delivery (a schedule, a task, a plugin's own message) is not the person's prompt to rate.
-    if (!isSent(e)) return next(e)
     // An armed Run in pick goes before the running-turn and first-prompt checks, so it hands off any prompt, including one typed
     // over a running turn (the desktop band stays up then); the new session rates it there. Only the person's own prompt takes it:
     // a notification or a peer's message, which can arrive at any time, leaves the pick armed.
@@ -1130,6 +1184,18 @@ export const register: Register = (on, options) => {
     if (before !== undefined && after !== undefined && after < before) count.compacted += before - after
     $.ui.invalidate('ui.render')
     return r
+  }).catch(($, e, next) => next(e))
+
+  // Background requests follow the switch: see retarget(). Only the engine's own requests; another plugin's are its own business.
+  // ponytail: rewrites the model in each request rather than running /model, since a plugin-run /model also saves the model as the
+  // person's default for new sessions; the engine still prices a moved request at the model it built it for, so /cost overstates it.
+  on('http.fetch', async ($, e, next) => {
+    if (next.origin.plugin !== 'engine') return next(e)
+    const body = retarget(override, e.init?.body)
+    if (body === undefined) return next(e)
+    const r = await next({ ...e, init: { ...e.init, body } })
+    // A field the engine built for the left model that the picked one refuses: sent again as built, rather than failing the request.
+    return 'value' in r && r.value?.status === 400 ? next(e) : r
   }).catch(($, e, next) => next(e))
 
   // ponytail: rewrites each request rather than running /model, which cannot run while the prompt waits on this hook
