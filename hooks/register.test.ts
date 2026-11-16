@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import { REVIEWER, decide, dropModel, endOverride, retarget } from './register.ts'
+import { REVIEWER, decide, dropModel, endOverride, retarget } from './register'
 import type { Engine } from 'claude-code/testing'
 import type {
   AgentSpawnInput,

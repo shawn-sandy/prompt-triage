@@ -70,8 +70,8 @@ Source proposal: `docs/prompts/proposal-make-model-switch-session-wide.md`.
 ### Phase: VERIFY
 
 7. [x] Update the README paragraph that started "The switch applies to the main conversation's requests" to say the switch moves the whole session, background requests included, how, and its two limits. Why: the README described the request-only switch. Verify: `grep -n "background requests" README.md` prints the new paragraph.
-8. Run `claude plugin test .`, `claude plugin validate .` and `npx --yes -p typescript@5.9 tsc --noEmit -p .`. Why: a green suite over code that fails validation or the typecheck is not verified. Verify: all three exit 0.
-   Result: test 259 pass, 0 fail; validate "Validation passed with warnings", exit 0; tsc fails with TS5097 on `hooks/register.test.ts` line 2 (an import path ending in `.ts` needs `allowImportingTsExtensions`). The same error appears at HEAD (16b91c1) with the same generated types, so it predates this plan; it stays open as a blocker.
+8. [x] Run `claude plugin test .`, `claude plugin validate .` and `npx --yes -p typescript@5.9 tsc --noEmit -p .`. Why: a green suite over code that fails validation or the typecheck is not verified. Verify: all three exit 0.
+   Result: test 268 pass, 0 fail; validate "Validation passed with warnings", exit 0; tsc exit 0, after the test file's import dropped its `.ts` extension (`from './register'`), which TS5097 rejected without `allowImportingTsExtensions`. That error predated this plan and was fixed on the PR at the person's request.
 9. [x] Drive a real session with `expect`: `claude --model opus --plugin-dir <logger above> --plugin-dir . --plugin-dir <logger below>` from a clean environment, a simple first prompt, "Switch to haiku", two more prompts, `/compact`, `/clear`. The two loggers are throwaway mods whose `http.fetch` hooks record each engine request's body model and status, one loaded before this checkout and one after (the debug log shows the chain as `wire-above, prompt-triage, wire-below`). Why: the test kit cannot raise `http.fetch`, so only a live session shows background requests moving. Verify: every request the outer logger saw on Opus after the switch, the inner logger saw on haiku with status 200; the transcript's assistant turns name haiku; `model` in `~/.claude/settings.json` is unchanged.
    Result (2026-11-16, session 0506ed70): the outer logger saw three requests on `claude-opus-5-5` (18:26:44 with 8 messages, the `/compact` at 18:27:14 with 8, and one at 18:27:17 with 1) and the inner logger saw the same three on `claude-haiku-5-5`, all status 200; the transcript's three assistant turns name `claude-haiku-5-5`, and its `compact_boundary` is `manual`; `model` in settings.json read `sonnet` before and after. `cost-state` still lists `claude-opus-5-5` at $0.0735, the engine pricing those three moved requests at Opus rates. Nothing was sent after the `/clear`, and no rewritten request was refused, so the 400 resend did not run. Desktop verification stays pending until a release is installed.
 
@@ -89,7 +89,7 @@ Tier 1 — This plan changes application code
 - [x] `## Decisions` holds a "Spike result" bullet naming the outcome, the call paths tried, and the readings from spike steps 1 and 2, and a "Route after the spike" bullet naming the approach taken instead.
 - [x] `claude plugin test .` exits 0 with the new `retarget()` tests included.
 - [x] `claude plugin validate .` exits 0.
-- [ ] `npx --yes -p typescript@5.9 tsc --noEmit -p .` exits 0. Blocked: TS5097 on `hooks/register.test.ts` line 2 fails at HEAD too, before this plan.
+- [x] `npx --yes -p typescript@5.9 tsc --noEmit -p .` exits 0.
 - [x] In a live `claude --plugin-dir .` session on Opus switched to haiku, every engine request built on Opus after the switch, `/compact` included, leaves on `claude-haiku-5-5` with status 200, and every main turn is answered by `claude-haiku-5-5`.
 - [x] The switch leaves `model` in `~/.claude/settings.json` unchanged, since the mod runs no `/model`.
 - [ ] After `/clear` the session runs on the model it started with, shown by a live request after `/clear`. Not yet verified live: the run in step 9 sent nothing after its `/clear`, and two retries reached the post-`/clear` dialog (it read "You are on claude-opus-5-5") but the `expect` script did not answer it, so no request ran. The test "a /clear ends the background rewrite" and the mod running no `/model` support it.
@@ -111,10 +111,6 @@ Start `claude --plugin-dir .` in this checkout on an Opus session, with a throwa
   ```text
   In the prompt-triage repo, add one line to the /triage-stats output and to the README decision-log section saying the cost figures price Claude Code's background requests (compaction, /recap, prompt suggestions) at the session model's rate even after a switch moved them. Add a test in hooks/register.test.ts that the /triage-stats output includes that note, without asserting its exact wording. Done when `claude plugin test .` exits 0.
   ```
-
-## Unresolved Questions
-
-- Fix the pre-existing TS5097 typecheck error (an `allowImportingTsExtensions` setting in `tsconfig.json`, or a different test import), so step 8's typecheck can pass? It fails at HEAD and is outside this plan's files.
 
 ## Resources
 
