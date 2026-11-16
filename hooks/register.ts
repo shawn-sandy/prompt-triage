@@ -652,11 +652,20 @@ function endCount(c: Count, cleared: boolean): void {
 
 /**
  * The main loop's model and effort override, and the status line that names it. Changed only by the functions below.
- * `model` is the model the person picked; undefined leaves the session's own. `effort` is the least effort the main loop runs at,
- * or with `exact` the effort it runs at; undefined leaves the session's own. `running` and `raised` are the status line's parts:
- * the model override, and the effort once a request was changed.
+ * `model` is the model the person picked; undefined leaves the session's own. `from` is the session's model the switch left, and
+ * `sendAs` the picked model's full id, read off the first request that named it, for retarget(). `effort` is the least effort the
+ * main loop runs at, or with `exact` the effort it runs at; undefined leaves the session's own. `running` and `raised` are the status
+ * line's parts: the model override, and the effort once a request was changed.
  */
-type Override = { model?: string; running?: string; effort?: ModelEffort; exact: boolean; raised: boolean }
+export type Override = {
+  model?: string
+  from?: string
+  sendAs?: string
+  running?: string
+  effort?: ModelEffort
+  exact: boolean
+  raised: boolean
+}
 
 /** The status line the override shows, or undefined when it shows none. */
 const overrideLine = (o: Override) =>
@@ -669,7 +678,7 @@ const onModel = (o: Override, current: string) => o.model ?? current
  * Applies the person's answer to a model dialog: the effort the rating sets (or exactly low) and the model the answer names.
  * Returns the decision to log, and whether the status line changed and needs showing.
  */
-function decide(o: Override, rating: Rating, current: string, answer: string | undefined): { entry: Decision; status: boolean } {
+export function decide(o: Override, rating: Rating, current: string, answer: string | undefined): { entry: Decision; status: boolean } {
   const chose = answer === undefined ? 'none asked' : chosen(answer, current)
   const from = onModel(o, current)
   // A prompt rated again (the improved one, say) replaces the minimum, so the status is shown afresh.
@@ -681,6 +690,8 @@ function decide(o: Override, rating: Rating, current: string, answer: string | u
   const picked = answer === keep(current) ? undefined : pickedModel(answer)
   if (picked) {
     o.model = picked
+    o.from = current
+    o.sendAs = undefined
     // The app already prefixes the plugin's name; name the session's model too, since its picker still shows it.
     o.running = `running ${picked}, not ${current}`
     status = true
@@ -702,8 +713,8 @@ function stepEffort(o: Override, level: TurnStepInput['effort']): { change: bool
 }
 
 /** The person's own /model: the model override ends, any effort override stays. */
-function dropModel(o: Override): void {
-  o.model = o.running = undefined
+export function dropModel(o: Override): void {
+  o.model = o.running = o.from = o.sendAs = undefined
 }
 
 /** The person's own /effort: the effort override ends, any model override stays. */
@@ -713,11 +724,41 @@ function dropEffort(o: Override): void {
 }
 
 /** Ends the whole override, as a /clear does; true when a status line was showing and now needs clearing. */
-function endOverride(o: Override): boolean {
+export function endOverride(o: Override): boolean {
   const showing = overrideLine(o) !== undefined
   dropModel(o)
   dropEffort(o)
   return showing
+}
+
+/**
+ * The body to send an engine model request with instead, or undefined to send it as built. Claude Code builds its background
+ * requests (compaction, /recap, prompt suggestions) on the session's own model and turn.step never sees them, so after a switch they
+ * would cache the whole conversation again on the model the person left. A request on the left model's family is moved to the picked
+ * model's full id, which the main loop's first request already carries (turn.step moved it); one on any other family is left alone.
+ * This also moves a subagent that inherits the session's model, as a real /model would; Explore keeps its haiku (agent.spawn).
+ * ponytail: matched by family, so an agent pinned to the left model's family moves too; a per-request origin would tell them apart.
+ * ponytail: a session on haiku is never rewritten, since the engine runs its own small helper requests on haiku and the family cannot
+ * tell them from background ones; those re-cache at haiku's price, the cheapest, so a switch up leaves them.
+ */
+export function retarget(o: Override, body: unknown): string | undefined {
+  if (o.model === undefined || o.from === undefined || typeof body !== 'string') return undefined
+  let request: { model?: unknown }
+  try {
+    request = JSON.parse(body)
+  } catch {
+    return undefined
+  }
+  const { model } = request
+  if (typeof model !== 'string') return undefined
+  const family = rank(model)
+  if (family !== undefined && family === rank(o.model)) {
+    o.sendAs = model
+    return undefined
+  }
+  const left = rank(o.from)
+  if (o.sendAs === undefined || left === undefined || left === RANK.haiku || family !== left) return undefined
+  return JSON.stringify({ ...request, model: o.sendAs })
 }
 
 export const register: Register = (on, options) => {
@@ -1130,6 +1171,18 @@ export const register: Register = (on, options) => {
     if (before !== undefined && after !== undefined && after < before) count.compacted += before - after
     $.ui.invalidate('ui.render')
     return r
+  }).catch(($, e, next) => next(e))
+
+  // Background requests follow the switch: see retarget(). Only the engine's own requests; another plugin's are its own business.
+  // ponytail: rewrites the model in each request rather than running /model, since a plugin-run /model also saves the model as the
+  // person's default for new sessions; the engine still prices a moved request at the model it built it for, so /cost overstates it.
+  on('http.fetch', async ($, e, next) => {
+    if (next.origin.plugin !== 'engine') return next(e)
+    const body = retarget(override, e.init?.body)
+    if (body === undefined) return next(e)
+    const r = await next({ ...e, init: { ...e.init, body } })
+    // A field the engine built for the left model that the picked one refuses: sent again as built, rather than failing the request.
+    return 'value' in r && r.value?.status === 400 ? next(e) : r
   }).catch(($, e, next) => next(e))
 
   // ponytail: rewrites each request rather than running /model, which cannot run while the prompt waits on this hook

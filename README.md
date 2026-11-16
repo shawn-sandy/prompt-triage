@@ -91,8 +91,21 @@ desktop app it can also hand a complex or long-running task to a new session.
    got and the effort it ran at, and `/triage-stats` prints the tally. See
    [The decision log](#the-decision-log).
 
-The switch applies to the main conversation's requests for the rest of the
-session; subagents keep their own models, with one exception: after a switch
+The switch moves the whole session from its first prompt: the main
+conversation's requests, and Claude Code's background requests (compaction,
+`/recap` and prompt suggestions). Claude Code builds those on the session's
+own model, so without the move each one would cache the whole conversation
+again at that model's price. The mod moves a background request by rewriting
+the model it names just before it is sent, rather than by running `/model`,
+because a `/model` a plugin runs also saves that model as your default for new
+sessions. It has two limits. `/cost` and the decision log still price a moved
+request at the session model's rate, so they overstate a switched session's
+spend. A session on `haiku` that switches up leaves its haiku requests alone,
+since Claude Code runs its own small helper requests on haiku too.
+
+A subagent's requests on the session model's family move with the session,
+whether it inherits the session's model or is pinned to that family. Subagents
+on any other model keep it, with one exception: after a switch
 up to `opus` or `fable`, the built-in Explore subagent runs on `haiku` when
 the request that starts it names no model of its own. Exploration is read-only
 and cheap to check, and would otherwise run at the pricier model's rate. A
