@@ -98,10 +98,13 @@ own model, so without the move each one would cache the whole conversation
 again at that model's price. The mod moves a background request by rewriting
 the model it names just before it is sent, rather than by running `/model`,
 because a `/model` a plugin runs also saves that model as your default for new
-sessions. It has two limits. `/cost` and the decision log still price a moved
+sessions. It has three limits. `/cost` and the decision log still price a moved
 request at the session model's rate, so they overstate a switched session's
 spend. A session on `haiku` that switches up leaves its haiku requests alone,
-since Claude Code runs its own small helper requests on haiku too.
+since Claude Code runs its own small helper requests on haiku too. Where your
+organization's guard mod loads, Claude Code shows its requests only to the
+organization's own mods, so there background requests stay on the session's
+model.
 
 A subagent's requests on the session model's family move with the session,
 whether it inherits the session's model or is pinned to that family. Subagents
