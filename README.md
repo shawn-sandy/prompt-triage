@@ -338,7 +338,10 @@ The figures update whenever the engine reports the cost or context moved,
 after each turn, and after `/clear` and a compaction. Below 25% context, or before a fresh conversation's first
 response, the row draws no button, since nothing needs clearing. From 25% the
 button appears. Pressing it opens a dialog that offers both, recommending **Clear** below
-60% context and **Compact** from 60%: **Compact**
+60% context and **Compact** from 60%. Both cutoffs are measured against at most
+200,000 tokens, so on a 1M window the button appears at 50,000 tokens and Compact is
+recommended from 120,000, rather than at 250,000 and 600,000, since each turn
+re-reads the whole context. The row still shows the reported percent. **Compact**
 keeps a summary to go on with the task, and **Clear** starts fresh for an
 unrelated one. The choice runs `/compact` or `/clear` once the session is idle.
 Closing the dialog runs nothing. The row shows whatever the `band` setting is.
@@ -403,6 +406,14 @@ A `simple` prompt gets the label only. Each **Refine prompt**,
 `/refine-prompt` or band **Refine** adds one `haiku` request, and a second when
 you answer its questions. The band makes no request while you type. `/triage-stats` makes no model
 request at all.
+
+The `haiku` alias is not always Haiku 5.5. Per
+[Which Claude model should you build with?](https://claude.dev/blog/which-claude-model-should-you-build-with/),
+it resolves to Haiku 5.5 on the Anthropic API from Claude Code v2.1.293, and
+still to Haiku 4.5 on Bedrock, Google Cloud, Microsoft Foundry and Claude
+Platform on AWS. The rating, **Refine prompt** and the Explore override all name
+`haiku`, so on those providers they run on the older model. The rating eval's
+scores were measured through the Anthropic API and are not a measure of Haiku 4.5.
 
 ## Limits
 

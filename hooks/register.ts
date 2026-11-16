@@ -140,6 +140,13 @@ const PICKER_KEYS: readonly Picker[] = ['goal', 'workflow', 'scope']
 // auto-compact window is not read (only a usage breakdown carries it); tune these, or read it, if the button shows too early or late.
 const CLEAR_AT = 25
 const COMPACT_AT = 60
+// The percents are measured against at most this many tokens. Every turn re-reads the whole context, and the window is now 1M on every
+// model, where 25% and 60% would mean 250K and 600K tokens: far past where the re-read cost matters. 200K keeps the old window's cutoffs.
+// ponytail: one fixed cap; read the model's own cost per token instead if the cutoffs need to follow price.
+const WINDOW_CAP = 200_000
+/** The fill the thresholds compare: the reported percent, or the tokens as a share of WINDOW_CAP when that is more. */
+const weight = (percent: number | undefined, tokens: number | undefined): number | undefined =>
+  tokens === undefined ? percent : Math.max(percent ?? 0, Math.round((tokens / WINDOW_CAP) * 100))
 const CLEAR = 'Clear'
 /** Token counts as the row shows them: 48.2K, 1.2M. */
 const COMPACT_NUMBER = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
@@ -151,8 +158,8 @@ const COMPACT = 'Compact'
  * command loses or rewrites the conversation. `$.ui.ask` answers a typed label the same as a picked one, so typing a label in full,
  * "Clear (recommended)" included, runs it; a bare "Clear" when Clear is the recommended option is not a label and runs nothing.
  */
-async function tidy($: EngineInterface, percent: number | undefined): Promise<void> {
-  const first = (percent ?? 0) >= COMPACT_AT ? COMPACT : CLEAR
+async function tidy($: EngineInterface, percent: number | undefined, tokens: number | undefined): Promise<void> {
+  const first = (weight(percent, tokens) ?? 0) >= COMPACT_AT ? COMPACT : CLEAR
   const options = [`${first} (recommended)`, first === COMPACT ? CLEAR : COMPACT]
   const fill = percent === undefined ? '' : `Context is ${percent}% full. `
   const answer = await $.ui
@@ -837,7 +844,7 @@ export const register: Register = (on, options) => {
               .join(' · ')}`,
           ),
           // An unknown fill (a fresh window, before its first response) counts as empty.
-          (percent ?? 0) < CLEAR_AT
+          (weight(percent, tokens) ?? 0) < CLEAR_AT
             ? null
             : h(Button, {
                 key: 'tidy',
@@ -851,7 +858,7 @@ export const register: Register = (on, options) => {
                   $.clock.after(
                     0,
                     () =>
-                      void tidy($, percent)
+                      void tidy($, percent, tokens)
                         .catch(() => $.ui.toast('Clear or compact failed'))
                         .finally(() => {
                           tidying = false

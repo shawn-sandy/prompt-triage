@@ -2476,6 +2476,31 @@ test('from 25% context the button reads Manage context', async ($, on) => {
   expect((await (await band($)).find({ key: 'tidy' }))?.props.label).toBe('Manage context')
 })
 
+// A 1M window makes the percent thresholds far too late: every turn re-reads the whole context, so the tokens decide, as on a 200K window.
+test('on a large window 60K tokens at 6% context still offers the button, recommending Clear', async ($, on) => {
+  const seen = engine(on, { turns: 3, usd: 0.2, pct: 6, tokens: 60_000, answer: 'Clear (recommended)' })
+  const ui = await band($)
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.asked[0]?.[0]).toMatch(/^Clear\b.*recommended/)
+  expect(seen.asked[0]?.[1]).toMatch(/^Compact\b/)
+  expect(seen.ran).toEqual(['clear'])
+})
+
+test('on a large window 150K tokens at 15% context recommends Compact', async ($, on) => {
+  const seen = engine(on, { turns: 3, usd: 0.2, pct: 15, tokens: 150_000, answer: 'Compact (recommended)' })
+  const ui = await band($)
+  await ui.press({ key: 'tidy' })
+  await settle()
+  expect(seen.asked[0]?.[1]).toMatch(/^Clear\b/)
+  expect(seen.ran).toEqual(['compact'])
+})
+
+test('on a large window 30K tokens at 3% context draws no button', async ($, on) => {
+  engine(on, { turns: 3, usd: 0.2, pct: 3, tokens: 30_000 })
+  expect(await (await band($)).find({ key: 'tidy' })).toBeUndefined()
+})
+
 test('below the compact threshold the button reads Manage context and the dialog recommends Clear; picking it runs /clear', async ($, on) => {
   const seen = engine(on, { turns: 2, usd: 0.1, pct: 59, answer: 'Clear (recommended)' })
   const ui = await band($)
