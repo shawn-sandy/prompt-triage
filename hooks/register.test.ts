@@ -2788,7 +2788,7 @@ test('a later request with no named effort level clears the effort an earlier tu
 
 // --- Background requests follow the switch ---
 // The test kit cannot raise http.fetch (a test's hooks may not call $.http.fetch), so these call retarget(), the hook's whole
-// decision, with the switch state decide() leaves. The hook's wiring and its 400 resend are checked in a live session.
+// decision, with the switch state decide() leaves. A live session checked the hook's wiring; its 400 resend has not run live.
 
 /** The switch state after a Switch to `model` from `from`, before any request was seen. */
 const switched = (model: string, from: string) => ({ model, from, exact: false, raised: false })
@@ -2855,11 +2855,12 @@ test('a /clear ends the background rewrite', () => {
   expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
 })
 
-test('a later switch learns its own id rather than sending on the earlier one', () => {
-  const o = switched('haiku', 'claude-opus-5-5')
+test('a later switch in the dialog learns its own id rather than sending on the earlier one', () => {
+  const o = { exact: false, raised: false }
+  decide(o, 'simple', 'claude-opus-5-5', 'Switch to haiku')
   retarget(o, body('claude-haiku-5-5'))
-  dropModel(o)
-  Object.assign(o, switched('sonnet', 'claude-opus-5-5'))
+  // A second dialog answer, with no /model of the person's own between: the haiku id must not carry over to the sonnet switch.
+  decide(o, 'moderate', 'claude-opus-5-5', 'Switch to sonnet')
   expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
   retarget(o, body('claude-sonnet-5-5'))
   expect(named(retarget(o, body('claude-opus-5-5')))).toBe('claude-sonnet-5-5')
