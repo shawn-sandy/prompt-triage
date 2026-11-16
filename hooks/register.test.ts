@@ -2826,6 +2826,23 @@ test("an engine helper request with no tools does not name the id, so background
   expect(named(retarget(o, body('claude-opus-5-5')))).toBe('claude-haiku-5-5')
 })
 
+test('a Mythos request is left alone after a switch away from Fable, though the two share a tier', () => {
+  const o = { exact: false, raised: false }
+  decide(o, 'simple', 'claude-fable-5-2', 'Switch to haiku')
+  retarget(o, main('claude-haiku-5-5'))
+  expect(retarget(o, body('claude-mythos-1'))).toBeUndefined()
+  expect(named(retarget(o, body('claude-fable-5-2')))).toBe('claude-haiku-5-5')
+})
+
+test('a Mythos request does not name the id after a switch to Fable', () => {
+  const o = { exact: false, raised: false }
+  decide(o, 'long-running', 'claude-opus-5-5', 'Switch to fable')
+  retarget(o, main('claude-mythos-1'))
+  expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
+  retarget(o, main('claude-fable-5-2'))
+  expect(named(retarget(o, body('claude-opus-5-5')))).toBe('claude-fable-5-2')
+})
+
 test('a background request before the main loop named the switched-to id is sent as built', () => {
   expect(retarget(switched('haiku', 'claude-opus-5-5'), body('claude-opus-5-5'))).toBeUndefined()
 })

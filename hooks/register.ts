@@ -19,6 +19,8 @@ const ALIASES = ['haiku', 'sonnet', 'opus', 'fable'] as const
 const RANK: Record<string, number> = { haiku: 0, sonnet: 1, opus: 2, fable: 3, mythos: 3 }
 /** The model's rank, or undefined for a name that holds no known family, such as "Default (recommended)". */
 const rank = (model: string) => Object.entries(RANK).find(([family]) => model.toLowerCase().includes(family))?.[1]
+/** The model's family, a RANK key, or undefined; unlike rank() it tells apart families that share a tier (Fable and Mythos). */
+const familyOf = (model: string) => Object.keys(RANK).find(family => model.toLowerCase().includes(family))
 /** A tier gap in words, for the dialog; RANK spans 0 to 3, so a gap never passes three. */
 const COUNT = ['zero', 'one', 'two', 'three']
 /** The store key under which the mod logs each model and effort decision, and how many entries it keeps. */
@@ -751,16 +753,16 @@ export function retarget(o: Override, body: unknown): string | undefined {
   }
   const { model } = request
   if (typeof model !== 'string') return undefined
-  const family = rank(model)
-  if (family !== undefined && family === rank(o.model)) {
+  const family = familyOf(model)
+  if (family !== undefined && family === familyOf(o.model)) {
     // The first main-loop request names the id, and it stays: a later request in that family (an engine helper on an older id, a
     // subagent pinned to one) must not redirect background requests. Helpers carry no tools; the main loop always does.
     // ponytail: a main loop run with no tools never names one, so its background requests stay on the left model
     if (o.sendAs === undefined && Array.isArray(request.tools) && request.tools.length > 0) o.sendAs = model
     return undefined
   }
-  const left = rank(o.from)
-  if (o.sendAs === undefined || left === undefined || left === RANK.haiku || family !== left) return undefined
+  const left = familyOf(o.from)
+  if (o.sendAs === undefined || left === undefined || left === 'haiku' || family !== left) return undefined
   return JSON.stringify({ ...request, model: o.sendAs })
 }
 
