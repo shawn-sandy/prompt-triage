@@ -2795,15 +2795,35 @@ const switched = (model: string, from: string) => ({ model, from, exact: false, 
 /** A request body as the engine builds one. */
 const body = (model: string, rest: Record<string, unknown> = {}) => JSON.stringify({ model, messages: [], ...rest })
 /** The model a body names. */
+/** A main-loop request body: it carries the session's tools, which the engine's small helper requests do not. */
+const main = (model: string) => body(model, { tools: [{ name: 'Read' }] })
 const named = (sent: string | undefined) => (sent === undefined ? undefined : JSON.parse(sent).model)
 
 test('after a switch to haiku a background request built on the session model is sent on haiku, the rest unchanged', () => {
   const o = switched('haiku', 'claude-opus-5-5')
   // The main loop's first request: turn.step already moved it, so it is sent as built and names the id to send the rest on.
-  expect(retarget(o, body('claude-haiku-5-5'))).toBeUndefined()
+  expect(retarget(o, main('claude-haiku-5-5'))).toBeUndefined()
   const sent = retarget(o, body('claude-opus-5-5', { system: 'kept' }))
   expect(named(sent)).toBe('claude-haiku-5-5')
   expect(JSON.parse(sent!).system).toBe('kept')
+})
+
+test('a later request on another id in the picked family does not replace the id the main loop named', () => {
+  const o = { exact: false, raised: false }
+  decide(o, 'simple', 'claude-opus-5-5', 'Switch to haiku')
+  retarget(o, main('claude-haiku-5-5'))
+  // A subagent pinned to an older haiku: its id must not become the one background requests are sent on.
+  retarget(o, main('claude-haiku-4-5'))
+  expect(named(retarget(o, body('claude-opus-5-5')))).toBe('claude-haiku-5-5')
+})
+
+test("an engine helper request with no tools does not name the id, so background requests wait for the main loop's", () => {
+  const o = { exact: false, raised: false }
+  decide(o, 'simple', 'claude-opus-5-5', 'Switch to haiku')
+  retarget(o, body('claude-haiku-4-5-20251001'))
+  expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
+  retarget(o, main('claude-haiku-5-5'))
+  expect(named(retarget(o, body('claude-opus-5-5')))).toBe('claude-haiku-5-5')
 })
 
 test('a background request before the main loop named the switched-to id is sent as built', () => {
@@ -2816,41 +2836,41 @@ test('with no switch every request is sent as built', () => {
 
 test("the engine's haiku helper requests are left alone after a switch to sonnet", () => {
   const o = switched('sonnet', 'claude-opus-5-5')
-  retarget(o, body('claude-sonnet-5-5'))
+  retarget(o, main('claude-sonnet-5-5'))
   expect(retarget(o, body('claude-haiku-5-5'))).toBeUndefined()
   expect(named(retarget(o, body('claude-opus-5-5')))).toBe('claude-sonnet-5-5')
 })
 
 test('a switch up from haiku leaves haiku requests alone, since the engine runs its own helpers on haiku too', () => {
   const o = switched('opus', 'claude-haiku-5-5')
-  retarget(o, body('claude-opus-5-5'))
+  retarget(o, main('claude-opus-5-5'))
   expect(retarget(o, body('claude-haiku-5-5'))).toBeUndefined()
 })
 
 test('a session model the mod cannot rank is never rewritten', () => {
   const o = switched('haiku', 'Default (recommended)')
-  retarget(o, body('claude-haiku-5-5'))
+  retarget(o, main('claude-haiku-5-5'))
   expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
 })
 
 for (const sent of ['not json', '{"messages":[]}', '{"model":7}', undefined, { base64: 'AAEC' }]) {
   test(`a body with no model name to move (${JSON.stringify(sent)}) is sent as built`, () => {
     const o = switched('haiku', 'claude-opus-5-5')
-    retarget(o, body('claude-haiku-5-5'))
+    retarget(o, main('claude-haiku-5-5'))
     expect(retarget(o, sent)).toBeUndefined()
   })
 }
 
 test("the person's own /model ends the background rewrite", () => {
   const o = switched('haiku', 'claude-opus-5-5')
-  retarget(o, body('claude-haiku-5-5'))
+  retarget(o, main('claude-haiku-5-5'))
   dropModel(o)
   expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
 })
 
 test('a /clear ends the background rewrite', () => {
   const o = switched('haiku', 'claude-opus-5-5')
-  retarget(o, body('claude-haiku-5-5'))
+  retarget(o, main('claude-haiku-5-5'))
   endOverride(o)
   expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
 })
@@ -2858,24 +2878,24 @@ test('a /clear ends the background rewrite', () => {
 test('a later switch in the dialog learns its own id rather than sending on the earlier one', () => {
   const o = { exact: false, raised: false }
   decide(o, 'simple', 'claude-opus-5-5', 'Switch to haiku')
-  retarget(o, body('claude-haiku-5-5'))
+  retarget(o, main('claude-haiku-5-5'))
   // A second dialog answer, with no /model of the person's own between: the haiku id must not carry over to the sonnet switch.
   decide(o, 'moderate', 'claude-opus-5-5', 'Switch to sonnet')
   expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
-  retarget(o, body('claude-sonnet-5-5'))
+  retarget(o, main('claude-sonnet-5-5'))
   expect(named(retarget(o, body('claude-opus-5-5')))).toBe('claude-sonnet-5-5')
 })
 
 test('Switch to haiku in the dialog moves background requests on the session model to haiku', () => {
   const o = { exact: false, raised: false }
   decide(o, 'simple', 'claude-opus-5-5', 'Switch to haiku')
-  retarget(o, body('claude-haiku-5-5'))
+  retarget(o, main('claude-haiku-5-5'))
   expect(named(retarget(o, body('claude-opus-5-5')))).toBe('claude-haiku-5-5')
 })
 
 test('Keep in the dialog moves no background request', () => {
   const o = { exact: false, raised: false }
   decide(o, 'simple', 'claude-opus-5-5', 'Keep claude-opus-5-5')
-  retarget(o, body('claude-haiku-5-5'))
+  retarget(o, main('claude-haiku-5-5'))
   expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
 })

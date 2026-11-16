@@ -653,7 +653,7 @@ function endCount(c: Count, cleared: boolean): void {
 /**
  * The main loop's model and effort override, and the status line that names it. Changed only by the functions below.
  * `model` is the model the person picked; undefined leaves the session's own. `from` is the session's model the switch left, and
- * `sendAs` the picked model's full id, read off the first request that named it, for retarget(). `effort` is the least effort the
+ * `sendAs` the picked model's full id, read once off the first main-loop request that named it, for retarget(). `effort` is the least effort the
  * main loop runs at, or with `exact` the effort it runs at; undefined leaves the session's own. `running` and `raised` are the status
  * line's parts: the model override, and the effort once a request was changed.
  */
@@ -743,7 +743,7 @@ export function endOverride(o: Override): boolean {
  */
 export function retarget(o: Override, body: unknown): string | undefined {
   if (o.model === undefined || o.from === undefined || typeof body !== 'string') return undefined
-  let request: { model?: unknown }
+  let request: { model?: unknown; tools?: unknown }
   try {
     request = JSON.parse(body)
   } catch {
@@ -753,7 +753,10 @@ export function retarget(o: Override, body: unknown): string | undefined {
   if (typeof model !== 'string') return undefined
   const family = rank(model)
   if (family !== undefined && family === rank(o.model)) {
-    o.sendAs = model
+    // The first main-loop request names the id, and it stays: a later request in that family (an engine helper on an older id, a
+    // subagent pinned to one) must not redirect background requests. Helpers carry no tools; the main loop always does.
+    // ponytail: a main loop run with no tools never names one, so its background requests stay on the left model
+    if (o.sendAs === undefined && Array.isArray(request.tools) && request.tools.length > 0) o.sendAs = model
     return undefined
   }
   const left = rank(o.from)
