@@ -1297,6 +1297,32 @@ test('a prompt sent while the band reviews is not followed by the rewrite or a r
   expect(await ui.find({ key: 'result' })).toBeUndefined()
 })
 
+test('a delivery the person did not send during a band review keeps the rewrite and its result row', async ($, on) => {
+  const s: Setup = { draft: LONG, review: REVIEWED, turns: 1 }
+  let sent: Promise<unknown> | undefined
+  s.onReview = () => {
+    sent = $.prompt.submit({ text: 'Background task finished', wait: false, origin: { kind: 'task-notification' }, turnId: 't1' } as never)
+  }
+  const seen = engine(on, s)
+  const ui = await band($)
+
+  await refine(ui)
+  await sent
+  expect(seen.filled).toHaveLength(1)
+  expect(await ui.find({ key: 'result' })).toBeDefined()
+})
+
+test('a delivery the person did not send leaves the result row, so Restore original still works', async ($, on) => {
+  const s: Setup = { draft: LONG, review: REVIEWED, turns: 1 }
+  engine(on, s)
+  const ui = await band($)
+
+  await refine(ui)
+  expect(await ui.find({ key: 'result' })).toBeDefined()
+  await $.prompt.submit({ text: 'Background task finished', wait: false, origin: { kind: 'task-notification' }, turnId: 't1' } as never)
+  expect(await ui.find({ key: 'result' })).toBeDefined()
+})
+
 test('the Plan first note follows the pick the review used, not one changed during it', async ($, on) => {
   const s: Setup = { draft: LONG, review: REVIEWED, store: { picks: { workflow: 'plan' } } }
   let picked: Promise<unknown> | undefined

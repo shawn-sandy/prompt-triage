@@ -1039,14 +1039,15 @@ export const register: Register = (on, options) => {
       if (counts && r.drop === undefined) countSent($, count)
       return r
     }
-    // A send closes the band's result row, and ends any band review running.
+    // A slash command, a hidden prompt or a delivery (a schedule, a task, a plugin's own message) is not the person's prompt to rate.
+    if (!isSent(e)) return next(e)
+    // The person's own send closes the band's result row, and ends any band review running; a delivery, which can arrive at any
+    // time, does neither, or it would drop the rewrite and Restore original.
     sends++
     if (result) {
       result = undefined
       $.ui.invalidate('ui.render')
     }
-    // A slash command, a hidden prompt or a delivery (a schedule, a task, a plugin's own message) is not the person's prompt to rate.
-    if (!isSent(e)) return next(e)
     // An armed Run in pick goes before the running-turn and first-prompt checks, so it hands off any prompt, including one typed
     // over a running turn (the desktop band stays up then); the new session rates it there. Only the person's own prompt takes it:
     // a notification or a peer's message, which can arrive at any time, leaves the pick armed.
