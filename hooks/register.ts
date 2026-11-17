@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PromptSubmitInput, Register, RenderElement, TurnStepInput } from 'claude-code'
+import type { EngineInterface, ModelEffort, PromptFilled, PromptSubmitInput, Register, RenderElement, TurnStepInput } from 'claude-code'
 
 // Each rating and the model alias it suggests.
 const SUGGEST = { simple: 'haiku', moderate: 'sonnet', complex: 'opus', 'long-running': 'fable' } as const
@@ -349,12 +349,33 @@ async function rework($: EngineInterface, text: string, picks: Picks): Promise<{
   return (answers.length ? await review($, text, picks, answers).catch(() => undefined) : undefined) ?? first
 }
 
+/** Why the box refused a fill, as the note says it; a hook's refusal carries no cause. */
+const REFUSED = { dialog: 'a dialog was open', no_composer: 'this session has no prompt box' } as const
+
+/**
+ * Puts `text` in the prompt box. A refusal is tried once more after a second, unless no box exists: the Clarify questions' last
+ * dialog can still hold the keys as the rewrite arrives, which once left a desktop rewrite out of the box. An absent cause is unknown,
+ * as the declarations say, so it is retried too.
+ * ponytail: one fixed retry; waiting on the dialog's close is the upgrade if a second proves too short
+ */
+async function fillBox($: EngineInterface, text: string): Promise<PromptFilled> {
+  const before = (await $.prompt.read()).text
+  const filled = await $.prompt.fill({ text })
+  if (filled.isFilled || filled.refusal === 'no_composer') return filled
+  await $.clock.sleep(1000)
+  // The fill replaces the draft, so one typed since the first try keeps the box and the rewrite stays in the note.
+  return (await $.prompt.read()).text === before ? $.prompt.fill({ text }) : filled
+}
+
 /** Reworks `text` and puts the rewrite in the prompt box; its issues and the note on where the rewrite went, or undefined when the review failed. */
 async function improve($: EngineInterface, text: string, picks: Picks): Promise<{ issues: string[]; note: string } | undefined> {
   const reviewed = await rework($, text, picks)
   if (!reviewed) return undefined
-  const { isFilled } = await $.prompt.fill({ text: reviewed.prompt })
-  const note = isFilled ? 'The improved prompt is in the prompt box: edit it or press Enter.' : `Improved prompt:\n\n${reviewed.prompt}`
+  const { isFilled, refusal } = await fillBox($, reviewed.prompt)
+  const why = refusal ? REFUSED[refusal] : 'no reason given'
+  const note = isFilled
+    ? 'The improved prompt is in the prompt box: edit it or press Enter.'
+    : `The prompt box did not take the improved prompt (${why}). Improved prompt:\n\n${reviewed.prompt}`
   return { issues: reviewed.issues, note }
 }
 
@@ -375,7 +396,7 @@ async function refineDraft(
   // Checked after the read, so a /clear that lands while the read is pending counts too.
   if ((await $.prompt.read()).text !== original || isStale()) return 'stale'
   // ponytail: a box that refuses the fill (none drawn) loses the rewrite with a toast; the band only draws where a box is
-  const { isFilled } = await $.prompt.fill({ text: reviewed.prompt })
+  const { isFilled } = await fillBox($, reviewed.prompt)
   // ponytail: a /clear that lands while the fill is pending cannot take the rewrite back out of the box, but the stale answer keeps
   // the result row and the spent Refine offer from coming back; refilling the original is the upgrade if that window ever matters.
   if (isStale()) return 'stale'
@@ -390,12 +411,12 @@ function asMarkdown({ issues, note }: { issues: string[]; note: string }): strin
 
 /**
  * A review as one plain sentence: the app draws a drop reason on a single row, raw, where a newline shows as a stray glyph.
- * The note is left as written, since a rewrite the prompt box could not take is the person's only copy of it.
+ * A rewrite the prompt box could not take is the person's only copy, so only its line breaks go: spaces within a line stay.
  */
 function asLine({ issues, note }: { issues: string[]; note: string }): string {
   const list = issues.map(i => i.replace(/\s+/g, ' ').replace(/[.;]+$/, '')).join('; ')
   const found = issues.length ? `Issues: ${list}${/[?!]$/.test(list) ? '' : '.'}` : 'No issues found.'
-  return `Held for review. ${found} ${note}`
+  return `Held for review. ${found} ${note.replace(/\s*\n\s*/g, ' ')}`
 }
 
 /** The decisions the store holds, oldest first; an empty list when there are none or the read failed. */
