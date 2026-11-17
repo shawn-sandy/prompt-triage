@@ -2461,6 +2461,43 @@ test('the status row leaves out what the session cannot read yet', async ($, on)
   expect(await ui.find({ type: 'Text', text: /\$|context|tokens/ })).toBeUndefined()
 })
 
+/** Ends one main-loop turn that ran for `durationMs`. */
+const completeIn = ($: Engine, durationMs: number) =>
+  $.turn.complete({ answer: 'Done.', durationMs, isAborted: false, turnId: 't1', reason: 'answer' })
+
+test('the status row adds the main loop turns’ summed run time as active time, leaving subagent turns out', async ($, on) => {
+  engine(on, { turns: 2, usd: 0.2 })
+  expect(await (await band($)).find({ type: 'Text', text: /active/ })).toBeUndefined()
+  await completeIn($, 125_000)
+  await completeIn($, 60_500)
+  // A subagent's turn runs inside the main turn's own time, so it adds none of its own.
+  await $.turn.complete({ answer: 'Done.', durationMs: 999_000, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'sub' })
+  expect(await (await band($)).find({ type: 'Text', text: /\b3m 5s active\b/ })).toBeDefined()
+})
+
+test('active time reads in hours once a session passes one, and a turn under a second shows none', async ($, on) => {
+  engine(on, { turns: 1, usd: 0.2 })
+  await completeIn($, 999)
+  expect(await (await band($)).find({ type: 'Text', text: /active/ })).toBeUndefined()
+  await completeIn($, 3_900_000)
+  expect(await (await band($)).find({ type: 'Text', text: /\b1h 5m active\b/ })).toBeDefined()
+})
+
+for (const reason of ['clear', 'resume'] as const) {
+  test(`a /${reason} starts active time over`, async ($, on) => {
+    engine(on, { turns: 2, usd: 0.2 })
+    await completeIn($, 125_000)
+    expect(await (await band($)).find({ type: 'Text', text: /\b2m 5s active\b/ })).toBeDefined()
+    await $.session.end({ reason, sessionId: 'ended', resume: { id: 'next' } })
+    // A /clear leaves the row off until the next prompt; with it drawn, none of the ended conversation's time shows.
+    await submit($, 'Fix the typo in the readme')
+    expect(await (await band($)).find({ type: 'Text', text: /\bprompts?\b/ })).toBeDefined()
+    expect(await (await band($)).find({ type: 'Text', text: /active/ })).toBeUndefined()
+    await completeIn($, 3_000)
+    expect(await (await band($)).find({ type: 'Text', text: /\b3s active\b/ })).toBeDefined()
+  })
+}
+
 // After /clear the window is empty (or not read yet) while the prompt count can still include the cleared conversation's prompts.
 for (const pct of [undefined, 0, 24] as const) {
   test(`a context fill of ${pct ?? 'unknown'} needs no clear, so the row draws no button`, async ($, on) => {
