@@ -63,8 +63,8 @@ const SIZE: Record<Rating, string> = {
 }
 /** The dialog's keep option names the model it keeps, so the choice reads without translating "current". */
 const keep = (model: string) => `Keep ${model}`
-/** The switch option's label; opus says its effort, since medium is the recommended default for it and the mod holds that floor. */
-const switchTo = (alias: string) => `Switch to ${alias}${alias === 'opus' ? ' (medium effort)' : ''}`
+/** The switch option's label; opus says its effort, since the mod holds a medium floor for it and keeps any higher level the session has. */
+const switchTo = (alias: string) => `Switch to ${alias}${alias === 'opus' ? ' (medium effort or higher)' : ''}`
 const LOW_EFFORT = 'Keep model, effort low'
 const NEW_SESSION = 'Open in a new session'
 const REFINE = 'Refine prompt'
