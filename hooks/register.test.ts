@@ -291,10 +291,10 @@ async function complete($: Engine, agentId?: string, answer = 'Done.', durationM
 }
 
 test('a complex first prompt offers opus, and picking it routes main-loop requests to opus', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer across three services')
-  expect(seen.asked).toEqual([['Switch to opus', 'Keep claude-sonnet-5-5', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5', 'Refine prompt']])
   expect(seen.status).toEqual(['running opus, not claude-sonnet-5-5'])
 
   await step($)
@@ -337,7 +337,7 @@ test('free text that turns a model down switches nothing', async ($, on) => {
 })
 
 test('a complex prompt on a model above opus is not offered a step down', async ($, on) => {
-  const seen = engine(on, { model: 'claude-fable-5-1', answer: 'Switch to opus' })
+  const seen = engine(on, { model: 'claude-fable-5-1', answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   expect(seen.asked).toEqual([])
@@ -347,7 +347,7 @@ test('a complex prompt on a model above opus is not offered a step down', async 
 })
 
 test('a later prompt in the session is not checked', async ($, on) => {
-  const seen = engine(on, { turns: 1, answer: 'Switch to opus' })
+  const seen = engine(on, { turns: 1, answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   expect(seen.ratings).toEqual([])
@@ -390,7 +390,7 @@ test('a dismissed dialog lets the prompt through unchanged', async ($, on) => {
 })
 
 test("the person's own /model ends the override", async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   await $.command.run({ command: 'model', args: 'sonnet', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
@@ -416,7 +416,7 @@ test('the improved prompt is rated again when sent, without offering another imp
 
   await submit($, 'Redesign the auth layer')
   await submit($, seen.filled[0]!)
-  expect(seen.asked[1]).toEqual(['Switch to opus', 'Keep claude-sonnet-5-5'])
+  expect(seen.asked[1]).toEqual(['Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5'])
   expect(seen.submitted[0]?.text).toBe('Redesign auth in api, web and admin; done when tests pass.')
 })
 
@@ -651,7 +651,7 @@ test('a dismissed dialog leaves effort alone', async ($, on) => {
 })
 
 test("the person's own /effort ends the effort minimum but keeps the model override", async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   await step($, undefined, 'low')
@@ -681,7 +681,7 @@ test('a prompt rated again replaces the effort minimum and its status', async ($
 })
 
 test('/model after a raise keeps the effort part of the status line', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   await step($, undefined, 'low')
@@ -725,7 +725,7 @@ test('a rating reply with no restatement still shows the dialog without one', as
   const seen = engine(on, { answer: 'Keep claude-sonnet-5-5' })
   await submit($, 'Redesign the auth layer')
   expect(seen.completesAtAsk).toEqual([1])
-  expect(seen.asked).toEqual([['Switch to opus', 'Keep claude-sonnet-5-5', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5', 'Refine prompt']])
   expect(seen.questions[0]).toMatch(/^Rated complex/)
   expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
 })
@@ -782,7 +782,7 @@ for (const [how, rating] of [
   ['throws', THROW],
 ] as const) {
   test(`a rating call that ${how} sends the prompt with no dialog`, async ($, on) => {
-    const seen = engine(on, { rating, answer: 'Switch to opus' })
+    const seen = engine(on, { rating, answer: 'Switch to opus (medium effort or higher)' })
 
     await submit($, 'Redesign the auth layer')
     expect(seen.ratings.length).toBe(1)
@@ -798,7 +798,7 @@ for (const model of ['claude-mythos-5-1', 'Default (recommended)']) {
     const seen = engine(on, { model, surfaces: ['desktop'], answer: `Keep ${model}` })
 
     await submit($, 'Redesign the auth layer')
-    expect(seen.asked.flat()).not.toContain('Switch to opus')
+    expect(seen.asked.flat()).not.toContain('Switch to opus (medium effort or higher)')
     await step($)
     expect(seen.steps[0]?.model).toBe('claude-sonnet-5-5')
   })
@@ -825,10 +825,10 @@ test('a long-running prompt on opus offers fable, and a new session in the deskt
 })
 
 test('a long-running prompt on sonnet offers opus as a step down from fable', async ($, on) => {
-  const seen = engine(on, { rating: 'long-running', model: 'claude-sonnet-5-5', answer: 'Switch to opus' })
+  const seen = engine(on, { rating: 'long-running', model: 'claude-sonnet-5-5', answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Migrate the whole codebase from Express to Fastify')
-  expect(seen.asked).toEqual([['Switch to fable', 'Switch to opus', 'Keep claude-sonnet-5-5', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Switch to fable', 'Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5', 'Refine prompt']])
   await step($, undefined, 'medium')
   expect(seen.steps[0]?.model).toBe('opus')
 })
@@ -837,7 +837,7 @@ test('a complex prompt on sonnet offers no step down, since opus is already the 
   const seen = engine(on, { rating: 'complex', model: 'claude-sonnet-5-5', answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
-  expect(seen.asked).toEqual([['Switch to opus', 'Keep claude-sonnet-5-5', 'Refine prompt']])
+  expect(seen.asked).toEqual([['Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5', 'Refine prompt']])
 })
 
 for (const model of ['claude-fable-5-1', 'claude-mythos-5-1']) {
@@ -1288,7 +1288,7 @@ test('a band refine marks the first prompt refined, so the model dialog does not
   const seen = engine(on, { draft: LONG, review: REVIEWED })
   await refine(await band($))
   await submit($, seen.filled[0]!)
-  expect(seen.asked[0]).toEqual(['Switch to opus', 'Keep claude-sonnet-5-5'])
+  expect(seen.asked[0]).toEqual(['Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5'])
 })
 
 test('the result row outlasts a short draft until the prompt is sent', async ($, on) => {
@@ -1547,7 +1547,7 @@ type Decision = {
 }
 
 test('a rated first prompt appends one decision naming the rating, the models before and after and the choice', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer across three services')
   expect(seen.store.decisions).toEqual([
@@ -1571,7 +1571,7 @@ test('a prompt that shows no dialog is logged as asked nothing, and a dismissed 
 
 test('the decision log never holds more than its cap', async ($, on) => {
   const old: Decision[] = Array.from({ length: 200 }, (_, i) => ({ rating: 'simple', from: 'x', to: 'x', chose: `old ${i}` }))
-  const seen = engine(on, { answer: 'Switch to opus', store: { decisions: old } })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', store: { decisions: old } })
 
   await submit($, 'Redesign the auth layer')
   const kept = seen.store.decisions as Decision[]
@@ -1581,7 +1581,7 @@ test('the decision log never holds more than its cap', async ($, on) => {
 })
 
 test('a failed store write does not hold up the prompt or the switch', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus', storeFails: true })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', storeFails: true })
 
   await submit($, 'Redesign the auth layer')
   expect(seen.submitted[0]?.text).toBe('Redesign the auth layer')
@@ -1629,7 +1629,7 @@ test('free text under Other that starts with Keep and names another model is log
 
 test('a failed store read never lets the next write replace the log', async ($, on) => {
   const old: Decision[] = [{ rating: 'simple', from: 'x', to: 'x', chose: 'old' }]
-  const seen = engine(on, { answer: 'Switch to opus', store: { decisions: old }, storeReadFails: true })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', store: { decisions: old }, storeReadFails: true })
 
   await submit($, 'Redesign the auth layer')
   expect(seen.store.decisions).toEqual(old)
@@ -1649,7 +1649,7 @@ test('a Refine whose review fails sends the prompt and logs the rated session as
 })
 
 test('refining then sending the rewrite logs one decision, for the rewrite', async ($, on) => {
-  const seen = engine(on, { answer: ['Refine prompt', 'Switch to opus'], review: REVIEWED })
+  const seen = engine(on, { answer: ['Refine prompt', 'Switch to opus (medium effort or higher)'], review: REVIEWED })
 
   await submit($, 'Redesign the auth layer')
   expect(seen.store.decisions).toBeUndefined()
@@ -1700,7 +1700,7 @@ test('/triage-stats with nothing logged says so', async ($, on) => {
 
 test('a main-loop turn records the spend since the decision on that entry, with an opaque id', async ($, on) => {
   // 0.25 is read when the decision is logged, 0.67 when the turn ends.
-  const seen = engine(on, { answer: 'Switch to opus', usd: [0.25, 0.67] })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', usd: [0.25, 0.67] })
 
   await submit($, 'Redesign the auth layer across three services')
   await complete($)
@@ -1712,7 +1712,7 @@ test('a main-loop turn records the spend since the decision on that entry, with 
 })
 
 test("a subagent's turn leaves the log as it was", async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus', usd: [0, 1] })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1] })
 
   await submit($, 'Redesign the auth layer')
   const before = JSON.stringify(seen.store)
@@ -1721,7 +1721,7 @@ test("a subagent's turn leaves the log as it was", async ($, on) => {
 })
 
 test('a second turn updates the same entry, and an unchanged figure writes nothing', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus', usd: [0.1, 0.3, 0.5, 0.5] })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', usd: [0.1, 0.3, 0.5, 0.5] })
 
   await submit($, 'Redesign the auth layer')
   await complete($)
@@ -1736,7 +1736,7 @@ test('a second turn updates the same entry, and an unchanged figure writes nothi
 
 test('a turn that spent nothing since the decision records no cost', async ($, on) => {
   // An aborted turn before any priced request: the ledger still reads the baseline.
-  const seen = engine(on, { answer: 'Switch to opus', usd: [0.5, 0.5] })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', usd: [0.5, 0.5] })
 
   await submit($, 'Redesign the auth layer')
   const writes = seen.writes()
@@ -1755,7 +1755,7 @@ for (const [base, now, cost] of [
   [0.1, 0.3, 0.2],
 ] as const) {
   test(`a spend of ${now} - ${base} is stored rounded down to four places, as ${cost}`, async ($, on) => {
-    const seen = engine(on, { answer: 'Switch to opus', usd: [base, now] })
+    const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', usd: [base, now] })
 
     await submit($, 'Redesign the auth layer')
     await complete($)
@@ -1764,7 +1764,7 @@ for (const [base, now, cost] of [
 }
 
 test('the store holds neither the prompt text nor the session id', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus', usd: [0, 2] })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', usd: [0, 2] })
 
   await submit($, 'Redesign the Zanzibar auth layer')
   await complete($)
@@ -1777,7 +1777,7 @@ for (const [chose, setup] of [
   ['dismissed', {}],
   ['Open in a new session', { surfaces: ['desktop'], answer: 'Open in a new session' }],
   ['Refine prompt', { answer: 'Refine prompt' }],
-  ['Switch to opus', { answer: 'Switch to opus' }],
+  ['Switch to opus', { answer: 'Switch to opus (medium effort or higher)' }],
 ] as [string, Setup][]) {
   test(`a decision logged as ${chose} carries an id`, async ($, on) => {
     const seen = engine(on, setup)
@@ -1794,7 +1794,7 @@ for (const [name, setup] of [
   ['a usage reading with no cost', {}],
 ] as const) {
   test(`${name} writes nothing and the answer passes through`, async ($, on) => {
-    const seen = engine(on, { answer: 'Switch to opus', ...setup })
+    const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', ...setup })
 
     await submit($, 'Redesign the auth layer')
     const before = JSON.stringify(seen.store)
@@ -1805,7 +1805,7 @@ for (const [name, setup] of [
 }
 
 test('a failed store read or write leaves the log as it was and the answer passes through', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 1, 2] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1, 2] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -1820,7 +1820,7 @@ test('a failed store read or write leaves the log as it was and the answer passe
 
 // A live /clear left the next prompt unrated: the turn count can still include the cleared conversation's prompts.
 test('the first prompt after /clear is rated and logged as its own decision, even while the turn count is not zero', async ($, on) => {
-  const s: Setup = { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2] }
+  const s: Setup = { answer: ['Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -1840,7 +1840,7 @@ test('the first prompt after /clear is rated and logged as its own decision, eve
 })
 
 test('the next prompt after /resume is not rated, since it continues a conversation', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus' }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)' }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -1853,7 +1853,7 @@ test('the next prompt after /resume is not rated, since it continues a conversat
 
 // A /clear starts a new conversation, so the cleared one's model override, effort and spent Refine offer do not carry into it.
 test('a /clear ends the model override, so a Keep on the next first prompt runs the session model', async ($, on) => {
-  const seen = engine(on, { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'] })
+  const seen = engine(on, { answer: ['Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5'] })
 
   await submit($, 'Redesign the auth layer')
   await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
@@ -1890,7 +1890,7 @@ test('a /clear offers Refine prompt again on the next first prompt after one was
 })
 
 test('a /resume keeps the model override: only a /clear starts afresh', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus' }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)' }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -1901,7 +1901,7 @@ test('a /resume keeps the model override: only a /clear starts afresh', async ($
 })
 
 test('an entry pushed out by the cap is not added back', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus', usd: [0, 1] })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1] })
 
   await submit($, 'Redesign the auth layer')
   const old: Decision[] = Array.from({ length: 200 }, (_, i) => ({ rating: 'simple', from: 'x', to: 'x', chose: `old ${i}`, id: `o${i}` }))
@@ -1913,7 +1913,7 @@ test('an entry pushed out by the cap is not added back', async ($, on) => {
 })
 
 test("another session's entries in the shared log are left alone", async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus', usd: [0, 1] })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1] })
 
   await submit($, 'Redesign the auth layer')
   // Another session logs its own decision between this session's turns.
@@ -1927,7 +1927,7 @@ test("another session's entries in the shared log are left alone", async ($, on)
 
 test('a new first prompt, as after /clear, gets its own id and a cost that leaves out the earlier spend', async ($, on) => {
   // The ledger never resets: 0 at A, 1 after its turn, 1.5 at B, 2 after its turn.
-  const seen = engine(on, { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2] })
+  const seen = engine(on, { answer: ['Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2] })
 
   await submit($, 'Redesign the auth layer')
   await complete($)
@@ -1943,7 +1943,7 @@ test('a new first prompt, as after /clear, gets its own id and a cost that leave
 for (const reason of ['resume', 'clear'] as const) {
   test(`after /${reason} the earlier decision gains none of the next session's spend`, async ($, on) => {
     // 5 at the decision, 6 after its turn; the next session's ledger reads 0.8.
-    const s: Setup = { answer: 'Switch to opus', usd: [5, 6, 0.8] }
+    const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [5, 6, 0.8] }
     const seen = engine(on, s)
 
     await submit($, 'Redesign the auth layer')
@@ -1956,7 +1956,7 @@ for (const reason of ['resume', 'clear'] as const) {
 }
 
 test('a first prompt that is not rated stops the earlier decision from gaining later spend', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 1, 0.2] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1, 0.2] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -2005,7 +2005,7 @@ test('/triage-stats shows no cost table when no entry has a cost', async ($, on)
 // --- How long each rated session ran and how full its context got, on the same entry as its cost ---
 
 test('a main-loop turn records the turns since the decision and the context percent on that entry', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 1], pct: [3, 42] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1], pct: [3, 42] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer across three services')
@@ -2019,7 +2019,7 @@ test('a main-loop turn records the turns since the decision and the context perc
 })
 
 test('a later turn replaces turns and ctx on the same entry, and unchanged figures write nothing', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 1, 2, 2], pct: [3, 20, 35, 35] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1, 2, 2], pct: [3, 20, 35, 35] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -2036,7 +2036,7 @@ test('a later turn replaces turns and ctx on the same entry, and unchanged figur
 })
 
 test("a subagent's turn records neither turns nor ctx", async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 1], pct: [3, 42] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1], pct: [3, 42] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -2048,7 +2048,7 @@ test("a subagent's turn records neither turns nor ctx", async ($, on) => {
 })
 
 test('turns counts from the decision, so a /clear whose turn count still holds the old conversation does not inflate it', async ($, on) => {
-  const s: Setup = { answer: ['Switch to opus', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2], pct: [1, 10, 2, 8] }
+  const s: Setup = { answer: ['Switch to opus (medium effort or higher)', 'Keep claude-sonnet-5-5'], usd: [0, 1, 1.5, 2], pct: [1, 10, 2, 8] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -2067,7 +2067,7 @@ test('turns counts from the decision, so a /clear whose turn count still holds t
 })
 
 test('a fresh session with no context percent yet records no ctx, and the cost still lands', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 0.5] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 0.5] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -2080,7 +2080,7 @@ test('a fresh session with no context percent yet records no ctx, and the cost s
 })
 
 test("a turn count that cannot be read at a turn's end changes nothing, since turns are the prompts sent", async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 1], pct: [3, 42] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1], pct: [3, 42] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -2091,7 +2091,7 @@ test("a turn count that cannot be read at a turn's end changes nothing, since tu
 })
 
 test('a usage reading that fails at the end of a turn still records turns, leaves cost and ctx out, and the answer passes through', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 1], pct: [3, 42] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1], pct: [3, 42] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the auth layer')
@@ -2105,7 +2105,7 @@ test('a usage reading that fails at the end of a turn still records turns, leave
 })
 
 test('the store still holds neither the prompt text nor the session id once turns and ctx are recorded', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 2], pct: [3, 42] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 2], pct: [3, 42] }
   const seen = engine(on, s)
 
   await submit($, 'Redesign the Zanzibar auth layer')
@@ -2206,7 +2206,7 @@ test('a complex prompt states no effort minimum in the dialog', async ($, on) =>
   const seen = engine(on, { rating: 'complex', model: 'claude-sonnet-5-5', restate: 'redesign auth', answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
-  expect(seen.questions[0]).toBe('Read as: redesign auth. Rated complex: an opus-sized task. You are on claude-sonnet-5-5. Run it how?')
+  expect(seen.questions[0]).toBe('Read as: redesign auth. Rated complex: an opus-sized task, and opus at medium effort is the recommended default for one. You are on claude-sonnet-5-5. Run it how?')
   expect(seen.questions[0]).not.toContain('Effort will be at least')
 })
 
@@ -2437,7 +2437,7 @@ test('a slash command typed before the first prompt does not stop that prompt be
 })
 
 test('the turns a decision records are the prompts sent since it, not transcript turns that also hold slash commands', async ($, on) => {
-  const s: Setup = { answer: 'Switch to opus', usd: [0, 1] }
+  const s: Setup = { answer: 'Switch to opus (medium effort or higher)', usd: [0, 1] }
   const seen = engine(on, s)
   await submit($, 'Redesign the auth layer')
   // The prompt, then /compact and /model recorded as user turns.
@@ -2809,7 +2809,7 @@ async function spawn($: Engine, extra: Record<string, unknown> = {}) {
 }
 
 test('after Switch to opus an Explore spawn with no model of its own runs on haiku', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   await spawn($)
@@ -2842,7 +2842,7 @@ test('after Switch to sonnet an Explore spawn is left alone: only a switch up to
 })
 
 test('after Switch to opus a spawn of another agent type is left alone', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   await spawn($, { subagentType: 'general-purpose' })
@@ -2850,7 +2850,7 @@ test('after Switch to opus a spawn of another agent type is left alone', async (
 })
 
 test('after Switch to opus a spawn that sets its own model keeps it', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   await spawn($, { model: 'sonnet' })
@@ -2858,7 +2858,7 @@ test('after Switch to opus a spawn that sets its own model keeps it', async ($, 
 })
 
 test('after Switch to opus a resumed Explore run and a teammate are left alone', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   await spawn($, { resume: { agentId: 'agent-9' } })
@@ -2870,7 +2870,7 @@ test('after Switch to opus a resumed Explore run and a teammate are left alone',
 })
 
 test('a /model of the persons own ends the Explore routing', async ($, on) => {
-  const seen = engine(on, { answer: 'Switch to opus' })
+  const seen = engine(on, { answer: 'Switch to opus (medium effort or higher)' })
 
   await submit($, 'Redesign the auth layer')
   await command($, 'model', 'sonnet')
@@ -2883,7 +2883,7 @@ test('a /model of the persons own ends the Explore routing', async ($, on) => {
 test("the plan's Final check: refine with a check, switch to opus, Explore on haiku, effort logged and tallied", async ($, on) => {
   const PROMPT = 'Redesign the auth layer so sessions survive a server restart'
   const today = new Date().toISOString().slice(0, 10)
-  const seen = engine(on, { answer: ['Refine prompt', 'Switch to opus'], review: REVIEWED, usd: [0, 2] })
+  const seen = engine(on, { answer: ['Refine prompt', 'Switch to opus (medium effort or higher)'], review: REVIEWED, usd: [0, 2] })
 
   // First send: rated complex on Sonnet, no effort sentence, and Refine prompt asks the reviewer for a check.
   await submit($, PROMPT)

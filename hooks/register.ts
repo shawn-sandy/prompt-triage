@@ -58,11 +58,13 @@ type Tracked = { id: string; base: number; turns0?: number; sent: Spend }
 const SIZE: Record<Rating, string> = {
   simple: 'haiku or low effort would do',
   moderate: 'a sonnet-sized task',
-  complex: 'an opus-sized task',
+  complex: 'an opus-sized task, and opus at medium effort is the recommended default for one',
   'long-running': 'a fable-sized job',
 }
 /** The dialog's keep option names the model it keeps, so the choice reads without translating "current". */
 const keep = (model: string) => `Keep ${model}`
+/** The switch option's label; opus says its effort, since the mod holds a medium floor for it and keeps any higher level the session has. */
+const switchTo = (alias: string) => `Switch to ${alias}${alias === 'opus' ? ' (medium effort or higher)' : ''}`
 const LOW_EFFORT = 'Keep model, effort low'
 const NEW_SESSION = 'Open in a new session'
 const REFINE = 'Refine prompt'
@@ -556,6 +558,8 @@ function isoDate(text: string): boolean {
  * since a model name can hold spaces ("Default (recommended)") and typed text such as "Keep opus" switches to opus.
  */
 function chosen(answer: string, current: string): string {
+  // The log keeps the label without its effort note, so entries from before the note still read the same.
+  if (answer === switchTo('opus')) return 'Switch to opus'
   if ([LOW_EFFORT, NEW_SESSION, REFINE, keep(current)].includes(answer) || /^Switch to (?:haiku|sonnet|opus|fable)$/.test(answer)) return answer
   const picked = pickedModel(answer)
   return picked ? `other: ${picked}` : 'other'
@@ -596,7 +600,7 @@ async function choose(
   // The tier below the suggestion, offered after it and only while it is itself a step up from the current model.
   const under = STEP_DOWN[rating]
   const below = under !== undefined && !fits && have !== undefined && have < RANK[under]! ? under : undefined
-  const switches = [...(fits ? [] : [`Switch to ${suggested}`]), ...(below ? [`Switch to ${below}`] : [])]
+  const switches = [...(fits ? [] : [switchTo(suggested)]), ...(below ? [switchTo(below)] : [])]
   // The guide prefers lowering effort to switching models, so a simple prompt is offered that first; but two or more tiers above
   // haiku the switch is the far stronger lever, so there it leads.
   const lower = rating === 'simple' && !fits ? [LOW_EFFORT] : []
