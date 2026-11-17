@@ -1205,6 +1205,18 @@ test('a /clear during a band Refine drops that review: no fill, no result row, a
   expect(seen.asked[0]).toContain('Refine prompt')
 })
 
+test("a /clear during the wait before a refused band fill is retried leaves the new conversation's box alone", async ($, on) => {
+  const seen = engine(on, { draft: LONG, review: REVIEWED, answer: 'Keep claude-sonnet-5-5', isFilled: [false, true] })
+  const ui = await band($)
+  await ui.press({ key: 'refine' })
+  await settle()
+  expect(seen.filled).toHaveLength(1)
+  // The Manage context button's /clear leaves the draft as it was, so the draft check alone would retry.
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  await advance(1000)
+  expect(seen.filled).toHaveLength(1)
+})
+
 test('a /clear that lands while the band Refine fills the box brings back neither its result row nor a spent Refine offer', async ($, on) => {
   const s: Setup = { draft: LONG, review: REVIEWED, answer: 'Keep claude-sonnet-5-5' }
   const seen = engine(on, s)

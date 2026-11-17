@@ -358,13 +358,16 @@ const REFUSED = { dialog: 'a dialog was open', no_composer: 'this session has no
  * as the declarations say, so it is retried too.
  * ponytail: one fixed retry; waiting on the dialog's close is the upgrade if a second proves too short
  */
-async function fillBox($: EngineInterface, text: string): Promise<PromptFilled> {
+async function fillBox($: EngineInterface, text: string, isStale: () => boolean = () => false): Promise<PromptFilled> {
   const before = (await $.prompt.read()).text
   const filled = await $.prompt.fill({ text })
   if (filled.isFilled || filled.refusal === 'no_composer') return filled
   await $.clock.sleep(1000)
-  // The fill replaces the draft, so one typed since the first try keeps the box and the rewrite stays in the note.
-  return (await $.prompt.read()).text === before ? $.prompt.fill({ text }) : filled
+  // The fill replaces the draft, so one typed since the first try keeps the box and the rewrite stays in the note. A band review whose
+  // conversation ended during the wait (a /clear can leave the draft as it was) is not retried either. Checked after the read, as
+  // refineDraft does, so a /clear that lands while the read is pending counts too.
+  const unchanged = (await $.prompt.read()).text === before && !isStale()
+  return unchanged ? $.prompt.fill({ text }) : filled
 }
 
 /** Reworks `text` and puts the rewrite in the prompt box; its issues and the note on where the rewrite went, or undefined when the review failed. */
@@ -396,7 +399,7 @@ async function refineDraft(
   // Checked after the read, so a /clear that lands while the read is pending counts too.
   if ((await $.prompt.read()).text !== original || isStale()) return 'stale'
   // ponytail: a box that refuses the fill twice (a dialog still up, or none drawn) loses the rewrite with a toast; the band only draws where a box is
-  const { isFilled } = await fillBox($, reviewed.prompt)
+  const { isFilled } = await fillBox($, reviewed.prompt, isStale)
   // ponytail: a /clear that lands while the fill is pending cannot take the rewrite back out of the box, but the stale answer keeps
   // the result row and the spent Refine offer from coming back; refilling the original is the upgrade if that window ever matters.
   if (isStale()) return 'stale'
