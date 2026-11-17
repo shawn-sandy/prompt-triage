@@ -281,9 +281,9 @@ async function step($: Engine, agentId?: string, effort?: TurnStepInput['effort'
   for await (const _ of stream);
 }
 
-/** Ends one turn of the main loop, or of a subagent's, with `answer` as its text; returns the text shown. */
-async function complete($: Engine, agentId?: string, answer = 'Done.') {
-  return await $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', ...(agentId ? { agentId } : {}) })
+/** Ends one turn of the main loop, or of a subagent's, with `answer` as its text, run for `durationMs`; returns the text shown. */
+async function complete($: Engine, agentId?: string, answer = 'Done.', durationMs = 1) {
+  return await $.turn.complete({ answer, durationMs, isAborted: false, turnId: 't1', reason: 'answer', ...(agentId ? { agentId } : {}) })
 }
 
 test('a complex first prompt offers opus, and picking it routes main-loop requests to opus', async ($, on) => {
@@ -2460,6 +2460,39 @@ test('the status row leaves out what the session cannot read yet', async ($, on)
   expect(await ui.find({ type: 'Text', text: /\b1 prompt\b/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /\$|context|tokens/ })).toBeUndefined()
 })
+
+test('the status row adds the summed run time of the main loop turns as active time, leaving subagent turns out', async ($, on) => {
+  engine(on, { turns: 2, usd: 0.2 })
+  expect(await (await band($)).find({ type: 'Text', text: /active/ })).toBeUndefined()
+  await complete($, undefined, 'Done.', 125_000)
+  await complete($, undefined, 'Done.', 60_500)
+  // A subagent's turn runs inside the main turn's own time, so it adds none of its own.
+  await complete($, 'sub', 'Done.', 999_000)
+  expect(await (await band($)).find({ type: 'Text', text: /\b3m 5s active\b/ })).toBeDefined()
+})
+
+test('active time reads in hours once a session passes one, and a turn under a second shows none', async ($, on) => {
+  engine(on, { turns: 1, usd: 0.2 })
+  await complete($, undefined, 'Done.', 999)
+  expect(await (await band($)).find({ type: 'Text', text: /active/ })).toBeUndefined()
+  await complete($, undefined, 'Done.', 3_900_000)
+  expect(await (await band($)).find({ type: 'Text', text: /\b1h 5m active\b/ })).toBeDefined()
+})
+
+for (const reason of ['clear', 'resume'] as const) {
+  test(`a /${reason} starts active time over`, async ($, on) => {
+    engine(on, { turns: 2, usd: 0.2 })
+    await complete($, undefined, 'Done.', 125_000)
+    expect(await (await band($)).find({ type: 'Text', text: /\b2m 5s active\b/ })).toBeDefined()
+    await $.session.end({ reason, sessionId: 'ended', resume: { id: 'next' } })
+    // A /clear leaves the row off until the next prompt; with it drawn, none of the ended conversation's time shows.
+    await submit($, 'Fix the typo in the readme')
+    expect(await (await band($)).find({ type: 'Text', text: /\bprompts?\b/ })).toBeDefined()
+    expect(await (await band($)).find({ type: 'Text', text: /active/ })).toBeUndefined()
+    await complete($, undefined, 'Done.', 3_000)
+    expect(await (await band($)).find({ type: 'Text', text: /\b3s active\b/ })).toBeDefined()
+  })
+}
 
 // After /clear the window is empty (or not read yet) while the prompt count can still include the cleared conversation's prompts.
 for (const pct of [undefined, 0, 24] as const) {

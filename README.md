@@ -272,10 +272,10 @@ draws there is one bordered **Triage** section above whatever else draws the
 band (the context ring, Compact), so the mod's controls read as a group:
 
 ```text
-╭───────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Triage  Goal: Auto  Workflow: As written  Scope: As written  Run in: This session  [r] Refine │
-│ Session estimate: $0.42 · 3 prompts · 52.6K tokens · 26% context   Manage context             │
-╰───────────────────────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Triage  Goal: Auto  Workflow: As written  Scope: As written  Run in: This session  [r] Refine                │
+│ Session estimate: $0.42 · 3 prompts · 3m 5s active · 52.6K tokens · 26% context   Manage context             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
 **Run in** is drawn in the desktop app only (see above). The band shows when the
@@ -326,15 +326,17 @@ prompt, so the model dialog does not offer **Refine prompt** again for it.
 
 After the first prompt, the bottom row of the Triage section shows a **Session
 estimate**: what the session has cost, how many prompts it has had and how
-many tokens are in the context window and what share of it they fill, with a
-**Manage context** button that the share decides. Only prompts you send count,
+many tokens are in the context window and what share of it they fill, and how
+long the session has been active (the summed run time of its turns, which
+restarts on `/clear`, `/resume`, `/branch` and a plugin reload), with a **Manage context**
+button that the share decides. Only prompts you send count,
 from any surface: slash commands such as `/compact` do not, nor do messages
 delivered to the session (a background task's notification, a scheduled
 prompt, another session's message). A compaction keeps the
 count, and `/clear` starts it over:
 
 ```text
-Session estimate: $0.42 · 3 prompts · 52.6K tokens · 26% context   Manage context
+Session estimate: $0.42 · 3 prompts · 3m 5s active · 52.6K tokens · 26% context   Manage context
 ```
 
 The figures update whenever the engine reports the cost or context moved,

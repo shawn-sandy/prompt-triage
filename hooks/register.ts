@@ -632,9 +632,19 @@ const readPrompts = ($: EngineInterface, compacted: number): Promise<number | un
  * `sent` is undefined until read; the transcript's user turns also hold each slash command's record, so it is seeded once and counted
  * from there. `compacted` is the user turns compactions summarized away, since turns() counts only those left in the transcript.
  * `era` counts conversations, so a count read that began in an ended conversation is not kept for the next.
+ * `activeMs` is the run time of the main loop's turns since the conversation began, for the status row's active time.
  * ponytail: seeded once from turns() (startup, a reload, /resume), so a resumed conversation's earlier commands still count there
+ * ponytail: `activeMs` is in memory only, so /resume and a mod reload restart it at zero; $.store is shared by every session, so it cannot hold it
  */
-type Count = { sent: number | undefined; compacted: number; era: number }
+type Count = { sent: number | undefined; compacted: number; era: number; activeMs: number }
+
+/** A run time as the status row shows it: `42s`, `19m 38s`, `1h 5m`. */
+function duration(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s % 60}s` : `${s}s`
+}
 
 /** Reads the prompt count when it is unknown; a read that fails leaves it unknown, and one that outlived its conversation is dropped. */
 async function seedCount($: EngineInterface, c: Count): Promise<void> {
@@ -655,6 +665,7 @@ function countSent($: EngineInterface, c: Count): void {
 /** Ends the conversation's count: /clear starts an empty one at zero; /resume and /branch move to one whose count is read afresh. */
 function endCount(c: Count, cleared: boolean): void {
   c.compacted = 0
+  c.activeMs = 0
   c.sent = cleared ? 0 : undefined
   c.era++
 }
@@ -775,7 +786,7 @@ export function retarget(o: Override, body: unknown): string | undefined {
 
 export const register: Register = (on, options) => {
   let tidying = false
-  const count: Count = { sent: undefined, compacted: 0, era: 0 }
+  const count: Count = { sent: undefined, compacted: 0, era: 0, activeMs: 0 }
   const override: Override = { exact: false, raised: false }
   // Set once the first prompt was improved, so its rewrite is rated again without a second offer.
   let improved = false
@@ -837,6 +848,8 @@ export const register: Register = (on, options) => {
             `Session estimate: ${[
               cost === undefined ? '' : usd(cost),
               `${prompts} prompt${prompts === 1 ? '' : 's'}`,
+              // Nothing before the first turn ends, and nothing for a total under a second.
+              count.activeMs < 1000 ? '' : `${duration(count.activeMs)} active`,
               tokens === undefined ? '' : `${COMPACT_NUMBER.format(tokens)} tokens`,
               percent === undefined ? '' : `${percent}% context`,
             ]
@@ -1117,6 +1130,8 @@ export const register: Register = (on, options) => {
   // ponytail: one store write per turn whose figures changed; session.measure (pushed, folds bursts) is the move if that ever matters
   on('turn.complete', async ($, e, next) => {
     const t = tracked
+    // A subagent's turn runs inside a main turn's own time, so only the main loop's adds to the active time.
+    if (!e.agentId) count.activeMs += e.durationMs
     // session.measure redraws only when the cost or context moved; a turn that moves neither (an API error, a host with no cost
     // ledger) would leave the row a turn behind on the prompt a send added. Redraws fold, so a turn that also measures costs no extra paint.
     if (!e.agentId) $.ui.invalidate('ui.render')
