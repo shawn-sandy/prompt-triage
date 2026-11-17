@@ -328,7 +328,7 @@ After the first prompt, the bottom row of the Triage section shows a **Session
 estimate**: what the session has cost, how many prompts it has had and how
 many tokens are in the context window and what share of it they fill, and how
 long the session has been active (the summed run time of its turns, which
-restarts on `/clear`, `/resume` and `/branch`), with a **Manage context**
+restarts on `/clear`, `/resume`, `/branch` and a plugin reload), with a **Manage context**
 button that the share decides. Only prompts you send count,
 from any surface: slash commands such as `/compact` do not, nor do messages
 delivered to the session (a background task's notification, a scheduled
