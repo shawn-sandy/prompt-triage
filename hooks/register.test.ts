@@ -26,8 +26,8 @@ type Setup = {
   review?: string | string[]
   /** Whether a path the prompt names exists, or the only paths that do. */
   exists?: boolean | string[]
-  /** Whether the prompt box takes the rewrite; undefined takes it. */
-  isFilled?: boolean
+  /** Whether the prompt box takes the rewrite, or one answer per fill in order; undefined takes it. */
+  isFilled?: boolean | boolean[]
   /** The restatement the rater adds on a second line under its label; none adds no line. */
   restate?: string
   /** The draft in the prompt box, read at each `$.prompt.read()`; empty when not given. */
@@ -82,6 +82,8 @@ const take = (v: string | string[] | undefined) => (Array.isArray(v) ? v.shift()
 
 /** Runs what is due on the last engine's mocked clock, such as a band Refine's timer. */
 let settle: () => Promise<void> = async () => {}
+/** Moves the last engine's mocked clock on, resolving each `$.clock.sleep` due on the way. */
+let advance: (ms: number) => Promise<void> = async () => {}
 
 /** Answers, beneath the plugin, every engine call the mod makes. */
 function engine(on: On, s: Setup) {
@@ -135,6 +137,7 @@ function engine(on: On, s: Setup) {
   // The band's Refine runs from a timer; a test moves this clock to run it.
   const clock = mock.clock(on)
   settle = clock.settle
+  advance = clock.advance
   // The mod's store, kept here so a test reads what was saved.
   const store: Record<string, unknown> = { ...s.store }
   on('store.get', (_$, e) => {
@@ -234,7 +237,8 @@ function engine(on: On, s: Setup) {
   on('prompt.fill', async (_$, e) => {
     await s.onFill?.()
     filled.push(e.text)
-    return { isFilled: s.isFilled ?? true }
+    // A hook's refusal carries no cause (the engine strips one it writes), so a test cannot stand in for a dialog or a missing box.
+    return { isFilled: (Array.isArray(s.isFilled) ? s.isFilled.shift() : s.isFilled) ?? true }
   })
 
   return {
@@ -451,12 +455,47 @@ test('a path only the rewrite names is checked even when the prompt names ten', 
   expect(result.drop).toContain('ghost.ts')
 })
 
-test('a rewrite the prompt box could not take is shown exactly as written', async ($, on) => {
+test('a rewrite the prompt box could not take is tried once more, then shown on one row', async ($, on) => {
   const rewrite = 'Redesign auth:\n- api\n- web\n\n```\n  keep   this\n```'
-  engine(on, { answer: 'Refine prompt', review: `<issues>\n- No done-criteria\n</issues>\n<prompt>${rewrite}</prompt>`, isFilled: false })
+  const seen = engine(on, {
+    answer: 'Refine prompt',
+    review: `<issues>\n- No done-criteria\n</issues>\n<prompt>${rewrite}</prompt>`,
+    isFilled: false,
+  })
 
-  const result = await submit($, 'Redesign the auth layer')
-  expect(result.drop).toContain(rewrite)
+  const sent = submit($, 'Redesign the auth layer')
+  await settle()
+  await advance(1000)
+  const result = await sent
+  expect(seen.filled).toHaveLength(2)
+  // The app draws a drop reason on one row, raw, where a newline shows as a stray glyph and the rewrite reads garbled.
+  expect(result.drop).not.toMatch(/\n/)
+  // Only the line breaks go: the spaces within a line are the person's only copy too.
+  expect(result.drop).toContain('Redesign auth: - api - web  ```   keep   this ```')
+})
+
+test('a refused rewrite lands in the box on the second try, once a closing dialog has had a second', async ($, on) => {
+  const seen = engine(on, { answer: 'Refine prompt', review: REVIEWED, isFilled: [false, true] })
+
+  const sent = submit($, 'Redesign the auth layer')
+  await settle()
+  expect(seen.filled).toHaveLength(1)
+  await advance(1000)
+  const result = await sent
+  expect(seen.filled).toEqual(Array(2).fill('Redesign auth in api, web and admin; done when tests pass.'))
+  expect(result.drop).not.toContain('Redesign auth in api, web and admin')
+})
+
+test('a draft typed while a refused rewrite waits for its second try is not written over', async ($, on) => {
+  const setup: Setup = { answer: 'Refine prompt', review: REVIEWED, isFilled: false, onFill: () => void (setup.draft = 'typed meanwhile') }
+  const seen = engine(on, setup)
+
+  const sent = submit($, 'Redesign the auth layer')
+  await settle()
+  await advance(1000)
+  const result = await sent
+  expect(seen.filled).toHaveLength(1)
+  expect(result.drop).toContain('Redesign auth in api, web and admin; done when tests pass.')
 })
 
 test('a failed review sends the prompt unchanged', async ($, on) => {
@@ -1164,6 +1203,18 @@ test('a /clear during a band Refine drops that review: no fill, no result row, a
   await submit($, 'Redesign the auth layer')
   expect(seen.asked.length).toBe(1)
   expect(seen.asked[0]).toContain('Refine prompt')
+})
+
+test("a /clear during the wait before a refused band fill is retried leaves the new conversation's box alone", async ($, on) => {
+  const seen = engine(on, { draft: LONG, review: REVIEWED, answer: 'Keep claude-sonnet-5-5', isFilled: [false, true] })
+  const ui = await band($)
+  await ui.press({ key: 'refine' })
+  await settle()
+  expect(seen.filled).toHaveLength(1)
+  // The Manage context button's /clear leaves the draft as it was, so the draft check alone would retry.
+  await $.session.end({ reason: 'clear', sessionId: 'ended', resume: { id: 'next' } })
+  await advance(1000)
+  expect(seen.filled).toHaveLength(1)
 })
 
 test('a /clear that lands while the band Refine fills the box brings back neither its result row nor a spent Refine offer', async ($, on) => {

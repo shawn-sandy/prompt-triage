@@ -248,7 +248,11 @@ Paths the prompt or the rewrite names, such as `src/auth.ts`, are checked
 against the working directory, and any that are missing are listed, so a path
 the review made up is caught. A glob such as `src/*.ts` is checked by its
 folder. The issues are shown, and the
-rewrite is put in the prompt box for you to edit or send with Enter. Sent, the
+rewrite is put in the prompt box for you to edit or send with Enter. If the box
+refuses it, as it can while a dialog still holds the keys, it is tried once more
+a second later, unless the session has no prompt box or you typed in it
+meanwhile. If it still is not taken, the held-for-review line says why and
+carries the rewrite, its line breaks turned to spaces. Sent, the
 rewrite is rated again, without a second improvement offer. If the review
 fails, the prompt is sent as typed. The review's reply is capped at 4096
 tokens, or one token per two characters of the prompt when that is more (at
