@@ -395,7 +395,7 @@ async function refineDraft(
   // A send or an ended conversation during the review (the box may still hold the same text) also leaves the box alone.
   // Checked after the read, so a /clear that lands while the read is pending counts too.
   if ((await $.prompt.read()).text !== original || isStale()) return 'stale'
-  // ponytail: a box that refuses the fill (none drawn) loses the rewrite with a toast; the band only draws where a box is
+  // ponytail: a box that refuses the fill twice (a dialog still up, or none drawn) loses the rewrite with a toast; the band only draws where a box is
   const { isFilled } = await fillBox($, reviewed.prompt)
   // ponytail: a /clear that lands while the fill is pending cannot take the rewrite back out of the box, but the stale answer keeps
   // the result row and the spent Refine offer from coming back; refilling the original is the upgrade if that window ever matters.
@@ -416,7 +416,7 @@ function asMarkdown({ issues, note }: { issues: string[]; note: string }): strin
 function asLine({ issues, note }: { issues: string[]; note: string }): string {
   const list = issues.map(i => i.replace(/\s+/g, ' ').replace(/[.;]+$/, '')).join('; ')
   const found = issues.length ? `Issues: ${list}${/[?!]$/.test(list) ? '' : '.'}` : 'No issues found.'
-  return `Held for review. ${found} ${note.replace(/\s*\n\s*/g, ' ')}`
+  return `Held for review. ${found} ${note.replace(/\r?\n/g, ' ')}`
 }
 
 /** The decisions the store holds, oldest first; an empty list when there are none or the read failed. */

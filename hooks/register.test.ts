@@ -471,7 +471,7 @@ test('a rewrite the prompt box could not take is tried once more, then shown on 
   // The app draws a drop reason on one row, raw, where a newline shows as a stray glyph and the rewrite reads garbled.
   expect(result.drop).not.toMatch(/\n/)
   // Only the line breaks go: the spaces within a line are the person's only copy too.
-  expect(result.drop).toContain('Redesign auth: - api - web ``` keep   this ```')
+  expect(result.drop).toContain('Redesign auth: - api - web  ```   keep   this ```')
 })
 
 test('a refused rewrite lands in the box on the second try, once a closing dialog has had a second', async ($, on) => {
