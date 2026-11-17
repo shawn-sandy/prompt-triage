@@ -28,7 +28,13 @@ desktop app it can also hand a complex or long-running task to a new session.
    prompt**. Under "Other" you can type a model name, such as `use sonnet`
    or `use fable`.
 
-   A `long-running` rating also offers **Switch to opus** under the `fable`
+   The opus switch is labeled **Switch to opus (medium effort)**, and a
+   `complex` rating's dialog says opus at medium effort is the recommended
+   default for it, per Anthropic's guidance to start most work on Opus 5.5 at
+   its default `medium` effort. The label is cosmetic: the log still records
+   it as `Switch to opus`.
+
+   A `long-running` rating also offers **Switch to opus (medium effort)** under the `fable`
    suggestion, whenever opus is itself a step up from your current model.
    `fable` is the one suggestion two tiers above the next rating's, and the
    rating eval's misses over-rate `complex` prompts as `long-running` (see
