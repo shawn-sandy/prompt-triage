@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import { REVIEWER, decide, dropModel, endOverride, retarget } from './register'
+import * as mod from './register'
 import type { Engine } from 'claude-code/testing'
 import type {
   AgentSpawnInput,
@@ -3050,4 +3051,10 @@ test('Keep in the dialog moves no background request', () => {
   decide(o, 'simple', 'claude-opus-5-5', 'Keep claude-opus-5-5')
   retarget(o, main('claude-haiku-5-5'))
   expect(retarget(o, body('claude-opus-5-5'))).toBeUndefined()
+})
+
+test('register.ts keeps exporting what the eval scripts and tests import', () => {
+  expect(Object.keys(mod).sort()).toEqual(['RATER', 'REVIEWER', 'decide', 'dropModel', 'endOverride', 'parseRating', 'register', 'retarget'])
+  for (const name of ['RATER', 'REVIEWER'] as const) expect(typeof mod[name]).toBe('string')
+  for (const name of ['decide', 'dropModel', 'endOverride', 'parseRating', 'register', 'retarget'] as const) expect(typeof mod[name]).toBe('function')
 })
