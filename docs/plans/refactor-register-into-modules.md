@@ -1,5 +1,5 @@
 ---
-status: todo
+status: in-progress
 type: refactor
 created: 2026-11-18
 repo-name: prompt-triage
@@ -97,15 +97,15 @@ code.
 
 ## Acceptance Criteria
 
-- [ ] `claude plugin test .` reports 275 passing, 0 failing, and exits 0 after every extraction commit.
-- [ ] `claude plugin validate .` and `claude plugin validate . --strict` exit 0.
-- [ ] The sorted export list of `hooks/register.ts` after the last step equals the list recorded in step 2.
-- [ ] No test in `hooks/register.test.ts` was edited, loosened or skipped, other than the one export test added in step 4.
-- [ ] `claude -p --plugin-dir .` loads the mod and the `/refine-prompt` commands behave as in step 6.
-- [ ] No file in `hooks/lib/` imports from `register.ts`, and only `models.ts` is imported by every other lib file (no cycles).
-- [ ] `.github/workflows/bump-version.yml` lists `hooks/lib/**` in its `paths` filter.
-- [ ] `hooks/hooks.json` and `.claude-plugin/plugin.json` are byte-identical to `main`.
-- [ ] The desktop `ui.render` output and the interactive dialogs are reported as not verified, not as passed.
+- [x] `claude plugin test .` reports 275 passing plus the one export test (276 in all), 0 failing, and exits 0 after every extraction commit.
+- [ ] `claude plugin validate .` and `claude plugin validate . --strict` exit 0. Blocked: `validate .` exits 0, but `--strict` exited 1 on the untouched baseline (0a55926) and still does, over the warning "CLAUDE.md at the plugin root is not loaded as project context". That predates this plan.
+- [x] The sorted export list of `hooks/register.ts` after the last step equals the list recorded in step 2.
+- [x] No test in `hooks/register.test.ts` was edited, loosened or skipped, other than the one export test added in step 4.
+- [x] `claude -p --plugin-dir .` loads the mod and the `/refine-prompt` commands behave as in step 6.
+- [x] No file in `hooks/lib/` imports from `register.ts`, and only `models.ts` is imported by every other lib file (no cycles).
+- [x] `.github/workflows/bump-version.yml` lists `hooks/lib/**` in its `paths` filter.
+- [x] `hooks/hooks.json` and `.claude-plugin/plugin.json` are byte-identical to `main`.
+- [x] The desktop `ui.render` output and the interactive dialogs are reported as not verified, not as passed (still pending: the first-prompt dialog, Clarify questions, drop line, Refine button, band, and the bump-version `paths` filter until its first merge to main).
 
 ## Verification
 
@@ -121,6 +121,17 @@ From the worktree root, in order:
 
 Not covered by any command above and therefore reported as pending: the first-prompt dialog, the
 Clarify questions, the drop line and the Refine button (TUI), and anything the desktop app renders.
+
+## Outcome
+
+Done on branch `claude/codebase-modularity-optimization-44d90d`, 11 commits, nothing pushed. `hooks/register.ts` is 1280 to 807 lines;
+`hooks/lib/` holds `models.ts` (100), `override.ts` (116), `stats.ts` (77), `decision-log.ts` (54), `count.ts` (77) and `pickers.ts` (91).
+`register()` is now 466 of the 807 lines, so it dominates what is left; option B is the next lever.
+Findings that changed the plan's text: the mod loader and `claude plugin test` follow relative imports; imports need the `.ts` extension
+(plain `node`, which the eval scripts use, fails without it); a dynamic `import()` is refused, so the export test uses `import * as`; and `$` may
+be passed only into function declarations past an import, so `readPrompts` became a `function` (the one non-verbatim edit). `LOG`, `LOG_CAP`,
+`Decision`, `Spend`, `Tracked`, `chosen` and `pickedModel` went into `models.ts` so `override.ts` and `stats.ts` import only it. The stats and
+decision-log moves share one commit. Prettier was run only on touched files.
 
 ## Next Steps _(optional)_
 
