@@ -574,7 +574,13 @@ node scripts/eval-rating.mjs --runs 3
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the fifteen hooks and the `/refine-prompt` and `/triage-stats` commands. |
+| `hooks/register.ts` | The mod's entry point: the fifteen hooks and the `/refine-prompt` and `/triage-stats` commands, over the state they share. |
+| `hooks/lib/models.ts` | Ratings, model tiers, dialog labels, the decision types and the answer parsing (`chosen`, `pickedModel`). |
+| `hooks/lib/override.ts` | The main-loop model and effort override: `decide`, `dropModel`, `endOverride`, `retarget`. |
+| `hooks/lib/stats.ts` | The `/triage-stats` tally (`tally`, `isoDate`). |
+| `hooks/lib/decision-log.ts` | Reading and writing the decision log in the store (`decisions`, `log`, `record`, `amend`). |
+| `hooks/lib/count.ts` | The count of prompts sent and the active time shown on the status row. |
+| `hooks/lib/pickers.ts` | The band's pickers, `REVIEWER` and the reviewer prompt built from them. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
 | `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`, once or averaged over `--runs N`. |

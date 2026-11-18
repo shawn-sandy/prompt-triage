@@ -1,7 +1,8 @@
 # prompt-triage
 
 A Claude Code mod. [README.md](README.md) describes what it does. The entry point is
-`hooks/register.ts`.
+`hooks/register.ts`; `hooks/lib/` holds the modules it imports. Import them with the `.ts` extension, and pass `$`
+only into function declarations (the mod loader refuses it past an arrow function).
 
 ## Mods reference
 
@@ -121,7 +122,7 @@ request merges. It reads
 the subject of every commit since the current version's release tag, or since the push's
 previous head when that tag is missing, not only the commits just pushed. If any of them starts
 `feat:` or `feat(scope):`, the bump is minor; otherwise it is a patch. Changes that touch none
-of those three files do not release, but their subjects still count toward the next bump.
+of those paths do not release, but their subjects still count toward the next bump.
 
 ## Files
 
