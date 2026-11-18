@@ -2207,9 +2207,7 @@ test('a complex prompt states no effort minimum in the dialog', async ($, on) =>
   const seen = engine(on, { rating: 'complex', model: 'claude-sonnet-5-5', restate: 'redesign auth', answer: 'Keep claude-sonnet-5-5' })
 
   await submit($, 'Redesign the auth layer')
-  expect(seen.questions[0]).toBe(
-    'Read as: redesign auth. Rated complex: an opus-sized task, and opus at medium effort is the recommended default for one. You are on claude-sonnet-5-5. Run it how?',
-  )
+  expect(seen.questions[0]).toBe('Read as: redesign auth. Rated complex: an opus-sized task, and opus at medium effort is the recommended default for one. You are on claude-sonnet-5-5. Run it how?')
   expect(seen.questions[0]).not.toContain('Effort will be at least')
 })
 
