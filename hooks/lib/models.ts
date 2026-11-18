@@ -42,3 +42,54 @@ export const HANDOFF =
   'The user chose to run this task in a new session. Start one with the start_session tool ' +
   '(initiation "user_asked", context "fresh"), using the prompt above as its brief plus a short written plan of the task ' +
   '(the files involved and the steps in order), so the new session starts from the plan and does not redo your reading. Do not do the task here.'
+
+/**
+ * One logged decision: the rating, the main-loop model before and after, and the option chosen. `id` is random and links to nothing
+ * (not the session id, which names the transcript file); it lets a later turn find the entry. `cost` is US dollars spent since the decision,
+ * `prompts` the prompts sent since it, `ctx` the context window's percent used at the latest turn's end, and `effort` the effort level
+ * the latest main-loop request ran at. `at` is the UTC date (YYYY-MM-DD) the decision was logged, so /triage-stats can split a tally at a release.
+ */
+export type Decision = {
+  rating: Rating
+  from: string
+  to: string
+  chose: string
+  id?: string
+  cost?: number
+  prompts?: number
+  /** Transcript turns since the decision, slash commands' records included, as entries logged before `prompts` hold. Not tallied. */
+  turns?: number
+  ctx?: number
+  effort?: ModelEffort
+  at?: string
+}
+/** The figures a turn records on a decision's entry. */
+export type Spend = Pick<Decision, 'cost' | 'prompts' | 'ctx' | 'effort'>
+/**
+ * The entry this session last logged, with the session's cost and turn count when it did, so a turn can record what followed.
+ * `sent` holds what was last written to the entry; `turns0` is the session's prompt count when it was logged, absent when it could not be read.
+ */
+export type Tracked = { id: string; base: number; turns0?: number; sent: Spend }
+
+/**
+ * The answer as the log records it: an offered label as is, and free text under "Other" as `other`, with the model alias it named
+ * when it named one. The text itself is never stored: it can carry anything the person typed. The keep label is matched exactly,
+ * since a model name can hold spaces ("Default (recommended)") and typed text such as "Keep opus" switches to opus.
+ */
+export function chosen(answer: string, current: string): string {
+  // The log keeps the label without its effort note, so entries from before the note still read the same.
+  if (answer === switchTo('opus')) return 'Switch to opus'
+  if ([LOW_EFFORT, NEW_SESSION, REFINE, keep(current)].includes(answer) || /^Switch to (?:haiku|sonnet|opus|fable)$/.test(answer)) return answer
+  const picked = pickedModel(answer)
+  return picked ? `other: ${picked}` : 'other'
+}
+
+/** The model alias an answer names, or undefined: the label chosen, or free text under "Other" such as "use sonnet". */
+export function pickedModel(answer: string | undefined): string | undefined {
+  // Text naming two models ("not haiku, use opus") is ambiguous, so it switches nothing.
+  const said = answer?.toLowerCase() ?? ''
+  const named = ALIASES.filter(alias => said.includes(alias))
+  // ponytail: any no-word switches nothing, so "no, use opus" is missed too; /model covers that, and a wrong switch is worse
+  const turnedDown = /\b(?:no|not|don't|dont|never|avoid|without)\b/.test(said)
+  return named.length === 1 && !turnedDown ? named[0] : undefined
+}
