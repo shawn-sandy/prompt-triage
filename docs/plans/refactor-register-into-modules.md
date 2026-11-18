@@ -111,8 +111,8 @@ code.
 
 From the worktree root, in order:
 
-1. `claude plugin test .` shows 275 pass, 0 fail, exit 0.
-2. `claude plugin validate .` and `claude plugin validate . --strict` exit 0.
+1. `claude plugin test .` shows 276 pass (275 existing plus the export test), 0 fail, exit 0.
+2. `claude plugin validate .` exits 0. `claude plugin validate . --strict` exits 1 on the untouched baseline too, over the CLAUDE.md-at-plugin-root warning; it passes this check when that is its only warning.
 3. The step 2 export-list command prints the same line as the baseline.
 4. `claude -p --plugin-dir . "/refine-prompt"` prints the usage line, and the long form reaches `no_composer`.
 5. `node scripts/eval-rating.mjs` starts and prints its header (one run is enough to prove the import).
