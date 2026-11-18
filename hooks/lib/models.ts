@@ -93,3 +93,8 @@ export function pickedModel(answer: string | undefined): string | undefined {
   const turnedDown = /\b(?:no|not|don't|dont|never|avoid|without)\b/.test(said)
   return named.length === 1 && !turnedDown ? named[0] : undefined
 }
+
+/** The store key under which the mod logs each model and effort decision, and how many entries it keeps. */
+export const LOG = 'decisions'
+// ponytail: ~100 bytes an entry, so 200 is ~20 KiB of the store's 4 MiB; raise it once /triage-stats wants a longer history
+export const LOG_CAP = 200
