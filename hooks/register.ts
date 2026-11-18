@@ -18,7 +18,7 @@ import {
   keep,
   rank,
   switchTo,
-} from './lib/models'
+} from './lib/models.ts'
 
 /** The store key under which the mod logs each model and effort decision, and how many entries it keeps. */
 const LOG = 'decisions'
