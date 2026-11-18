@@ -590,7 +590,7 @@ node scripts/eval-rating.mjs --runs 3
 Installed users only get an update when `version` in
 `.claude-plugin/plugin.json` changes. You do not edit it by hand: the
 `bump-version` workflow does it when a push to `main` changes
-`hooks/register.ts`, `hooks/hooks.json` or the workflow file itself. It raises
+`hooks/register.ts`, anything in `hooks/lib/`, `hooks/hooks.json` or the workflow file itself. It raises
 the minor number if a pushed commit subject starts with `feat:` or
 `feat(scope):`, and the patch number otherwise. It commits the new version to a
 `bump/v<version>` branch and opens a pull request for it. When that pull request
