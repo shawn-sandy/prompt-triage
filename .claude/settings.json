@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v claude >/dev/null 2>&1 || exit 0; f=$(jq -r '.tool_input.file_path // .tool_response.filePath // empty'); [ -n \"$f\" ] || exit 0; f=$(realpath \"$f\" 2>/dev/null) || exit 0; root=$(git -C \"$(dirname \"$f\")\" rev-parse --show-toplevel 2>/dev/null) || exit 0; [ -f \"$root/.claude-plugin/plugin.json\" ] || exit 0; case \"$f\" in \"$root\"/.git/*) exit 0 ;; \"$root\"/*) ;; *) exit 0 ;; esac; cd \"$root\" && out=$(claude plugin validate . 2>&1) || { echo \"$out\" >&2; exit 2; }",
+            "command": "command -v claude >/dev/null 2>&1 || exit 0; root=$(realpath \"${CLAUDE_PROJECT_DIR:-.}\" 2>/dev/null) || exit 0; command -v jq >/dev/null 2>&1 || { echo \"validate-plugin hook skipped: jq is not installed\" >&2; exit 0; }; f=$(jq -r '.tool_input.file_path // .tool_response.filePath // empty'); [ -n \"$f\" ] || exit 0; f=$(realpath \"$f\" 2>/dev/null) || exit 0; case \"$f\" in \"$root\"/.git/*) exit 0 ;; \"$root\"/*) ;; *) exit 0 ;; esac; [ -f \"$root/.claude-plugin/plugin.json\" ] || exit 0; cd \"$root\" && out=$(claude plugin validate . 2>&1) || { echo \"$out\" >&2; exit 2; }",
             "timeout": 60,
             "statusMessage": "Validating plugin manifest"
           }
