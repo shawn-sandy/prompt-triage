@@ -13,7 +13,10 @@ import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 const isWindows = process.platform === 'win32';
-const CAPTURE = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+// NoDefaultCurrentDirectoryInExePath stops Windows from resolving a bare program
+// name (node, git, claude) from the working directory, which is the edited worktree.
+const CHILD_ENV = { ...process.env, NoDefaultCurrentDirectoryInExePath: '1' };
+const CAPTURE = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: CHILD_ENV };
 
 // Run a command with no shell and return its trimmed stdout, or null on failure.
 function capture(cmd, args, cwd) {
