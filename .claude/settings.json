@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .claude/hooks/validate-plugin.mjs",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate-plugin.mjs\"",
             "timeout": 60,
             "statusMessage": "Validating plugin manifest"
           }
