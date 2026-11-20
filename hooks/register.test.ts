@@ -2683,6 +2683,27 @@ test('Run in: New session asks Claude to put a short written plan in the brief',
   expect(asksForPlan(seen.submitted[0])).toBe(true)
 })
 
+// --- The hand-off asks for an offer card, which auto mode allows ---
+
+// The instruction reaches Claude as hook context, not the person's words, so auto mode's classifier blocked a "user_asked" start.
+const handOffInitiation = (e?: PromptSubmitInput) =>
+  e?.context?.find(c => c.includes('start_session'))?.match(/initiation "(\w+)"/)?.[1]
+
+test('the hand-off asks for an offer, not a start the person never typed', async ($, on) => {
+  const seen = engine(on, { surfaces: ['desktop'], answer: 'Open in a new session' })
+
+  await submit($, 'Redesign the auth layer')
+  expect(handOffInitiation(seen.submitted[0])).toBe('offer')
+})
+
+test('Run in: New session asks for an offer too', async ($, on) => {
+  const seen = engine(on, { surfaces: ['desktop'] })
+
+  await armHandOff($)
+  await submit($, 'Redesign the auth layer')
+  expect(handOffInitiation(seen.submitted[0])).toBe('offer')
+})
+
 // --- The effort a session ran at, and the date, on the decision entry ---
 
 test('a main-loop turn records the effort the request ran at on the decision entry', async ($, on) => {
