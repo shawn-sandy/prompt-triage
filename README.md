@@ -61,7 +61,9 @@ desktop app it can also hand a complex or long-running task to a new session.
    this one, with the prompt as its brief plus a short written plan of the
    task, so the new session starts from the plan rather than from nothing. The
    mod cannot start the session itself, so it depends on Claude following that
-   instruction.
+   instruction. Claude proposes the session as a card you start with one
+   click: the instruction reaches Claude as hook context rather than your own
+   words, so auto mode blocks a session started without that click.
 
    For any prompt, not only the first, the desktop app also draws a **Run in**
    picker in the band above the prompt input. Set it to **New session** and

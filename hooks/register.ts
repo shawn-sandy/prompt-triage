@@ -68,9 +68,11 @@ const switchTo = (alias: string) => `Switch to ${alias}${alias === 'opus' ? ' (m
 const LOW_EFFORT = 'Keep model, effort low'
 const NEW_SESSION = 'Open in a new session'
 const REFINE = 'Refine prompt'
+// "offer", not "user_asked": this reaches Claude as hook context, not the person's words, so auto mode's classifier blocks a
+// start it cannot trace to them. An offer shows a card the person clicks, which it allows.
 const HANDOFF =
   'The user chose to run this task in a new session. Start one with the start_session tool ' +
-  '(initiation "user_asked", context "fresh"), using the prompt above as its brief plus a short written plan of the task ' +
+  '(initiation "offer", context "fresh"), using the prompt above as its brief plus a short written plan of the task ' +
   '(the files involved and the steps in order), so the new session starts from the plan and does not redo your reading. Do not do the task here.'
 
 /** The reviewer's base system prompt. Exported so scripts/eval-refine.mjs scores the exact text sent and a test can check it reaches each review call. */
