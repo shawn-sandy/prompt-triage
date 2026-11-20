@@ -90,3 +90,72 @@ test('allows a commit with nothing staged', () => {
   const result = runHook({ repo, command: COMMIT });
   assert.equal(result.status, 0);
 });
+
+function writeFiles(dir, files) {
+  for (const [path, content] of Object.entries(files)) {
+    const full = join(dir, path);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, content);
+  }
+}
+
+function commitBaseline(dir, files) {
+  writeFiles(dir, files);
+  execFileSync('git', ['add', '--', ...Object.keys(files)], { cwd: dir });
+  execFileSync('git', ['commit', '-q', '-m', 'baseline'], { cwd: dir });
+}
+
+test('does not block a non-commit command that only mentions git commit', () => {
+  const repo = makeRepo({ 'plugins/app/index.ts': 'export const x = 1;\n' });
+  const result = runHook({ repo, command: 'echo git commit' });
+  assert.equal(result.status, 0);
+});
+
+test('blocks a commit invoked with global git options', () => {
+  const repo = makeRepo({ 'plugins/app/index.ts': 'export const x = 1;\n' });
+  const result = runHook({ repo, command: 'git -C . commit -m change' });
+  assert.equal(result.status, 2);
+});
+
+test('blocks a compound command that stages untested code before committing', () => {
+  const repo = makeRepo({});
+  writeFiles(repo, { 'plugins/app/index.ts': 'export const x = 1;\n' });
+  const result = runHook({ repo, command: 'git add plugins/app/index.ts && git commit -m change' });
+  assert.equal(result.status, 2);
+});
+
+test('blocks commit -am of modified tracked code without a test', () => {
+  const repo = makeRepo({});
+  commitBaseline(repo, { 'plugins/app/index.ts': 'export const x = 1;\n' });
+  writeFiles(repo, { 'plugins/app/index.ts': 'export const x = 2;\n' });
+  const result = runHook({ repo, command: 'git commit -am change' });
+  assert.equal(result.status, 2);
+});
+
+test('does not count a deleted test as a regression test', () => {
+  const repo = makeRepo({});
+  commitBaseline(repo, {
+    'plugins/app/index.ts': 'export const x = 1;\n',
+    'plugins/app/index.test.ts': 'import "./index";\n',
+  });
+  writeFiles(repo, { 'plugins/app/index.ts': 'export const x = 2;\n' });
+  execFileSync('git', ['add', '--', 'plugins/app/index.ts'], { cwd: repo });
+  execFileSync('git', ['rm', '-q', '--', 'plugins/app/index.test.ts'], { cwd: repo });
+  const result = runHook({ repo, command: COMMIT });
+  assert.equal(result.status, 2);
+});
+
+test('allows code staged together with a modified existing test', () => {
+  const repo = makeRepo({});
+  commitBaseline(repo, {
+    'plugins/app/index.ts': 'export const x = 1;\n',
+    'plugins/app/index.test.ts': 'import "./index";\n',
+  });
+  writeFiles(repo, {
+    'plugins/app/index.ts': 'export const x = 2;\n',
+    'plugins/app/index.test.ts': 'import "./index"; // updated\n',
+  });
+  execFileSync('git', ['add', '--', 'plugins/app'], { cwd: repo });
+  const result = runHook({ repo, command: COMMIT });
+  assert.equal(result.status, 0);
+});
