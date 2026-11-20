@@ -20,5 +20,20 @@
       "Bash(git *--receive-pack*)",
       "Bash(git *--exec*)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate-plugin.mjs\"",
+            "timeout": 60,
+            "statusMessage": "Validating plugin manifest"
+          }
+        ]
+      }
+    ]
   }
 }
