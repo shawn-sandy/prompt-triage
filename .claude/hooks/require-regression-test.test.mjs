@@ -145,6 +145,48 @@ test('does not count a deleted test as a regression test', () => {
   assert.equal(result.status, 2);
 });
 
+test('blocks a commit inside a subshell', () => {
+  const repo = makeRepo({ 'plugins/app/index.ts': 'export const x = 1;\n' });
+  assert.equal(runHook({ repo, command: '(git commit -m x)' }).status, 2);
+});
+
+test('blocks a commit inside braces', () => {
+  const repo = makeRepo({ 'plugins/app/index.ts': 'export const x = 1;\n' });
+  assert.equal(runHook({ repo, command: '{ git commit -m x; }' }).status, 2);
+});
+
+test('blocks a commit inside command substitution', () => {
+  const repo = makeRepo({ 'plugins/app/index.ts': 'export const x = 1;\n' });
+  assert.equal(runHook({ repo, command: 'echo $(git commit -m x)' }).status, 2);
+});
+
+test('blocks a background staging command followed by a commit', () => {
+  const repo = makeRepo({});
+  writeFiles(repo, { 'plugins/app/index.ts': 'export const x = 1;\n' });
+  const result = runHook({ repo, command: 'git add plugins/app/index.ts & git commit -m x' });
+  assert.equal(result.status, 2);
+});
+
+test('blocks a commit run through env', () => {
+  const repo = makeRepo({ 'plugins/app/index.ts': 'export const x = 1;\n' });
+  assert.equal(runHook({ repo, command: 'env git commit -m x' }).status, 2);
+});
+
+test('blocks a commit run through an absolute git path', () => {
+  const repo = makeRepo({ 'plugins/app/index.ts': 'export const x = 1;\n' });
+  assert.equal(runHook({ repo, command: '/usr/bin/git commit -m x' }).status, 2);
+});
+
+test('blocks a commit after a shell keyword', () => {
+  const repo = makeRepo({ 'plugins/app/index.ts': 'export const x = 1;\n' });
+  assert.equal(runHook({ repo, command: 'if true; then git commit -m x; fi' }).status, 2);
+});
+
+test('blocks a commit passed through xargs', () => {
+  const repo = makeRepo({ 'plugins/app/index.ts': 'export const x = 1;\n' });
+  assert.equal(runHook({ repo, command: 'echo -- | xargs git commit -m x' }).status, 2);
+});
+
 test('allows code staged together with a modified existing test', () => {
   const repo = makeRepo({});
   commitBaseline(repo, {

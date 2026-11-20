@@ -20,11 +20,19 @@ if (process.platform === 'win32') process.env.NoDefaultCurrentDirectoryInExePath
 const CODE_DIRS = ['plugins/', 'hooks/'];
 const CODE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$/;
-const SHELL_SEPARATORS = /&&|\|\||;|\||\n/;
+const SHELL_SEPARATORS = /&&|\|\||;|\||&|\n/;
+// Any command that mentions both git and commit is checked, even when the parser cannot model it.
+const MENTIONS_GIT_COMMIT = /\bgit\b[\s\S]*\bcommit\b/;
+// Shell syntax the word splitter does not model: subshells, braces, command substitution, backticks.
+const UNMODELLED_SYNTAX = /[(){}`$]/;
 const STAGING_SUBCOMMANDS = new Set(['add', 'stage', 'rm', 'mv']);
 // Git global options that take a separate value argument.
 const GLOBAL_OPTIONS_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env']);
 const SHELLS = new Set(['sh', 'bash', 'zsh']);
+// Programs that run another program. When one of these sits in a segment that names git and commit, the segment fails closed.
+const WRAPPERS = new Set(['env', 'command', 'builtin', 'exec', 'nohup', 'nice', 'time', 'sudo', 'xargs']);
+// Shell keywords that may precede a command.
+const KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', 'time']);
 
 function realpath(path) {
   try {
@@ -70,8 +78,17 @@ function tokenize(segment) {
 // Return the git subcommand and its arguments when the words are a git invocation.
 function gitInvocation(words) {
   let i = 0;
-  while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i])) i += 1;
-  if (words[i] !== 'git') return null;
+  while (
+    i < words.length &&
+    (KEYWORDS.has(words[i]) ||
+      WRAPPERS.has(words[i]) ||
+      /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]) ||
+      (i > 0 && words[i].startsWith('-')))
+  ) {
+    i += 1;
+  }
+  // Accept an absolute or relative path to git, such as /usr/bin/git.
+  if (i >= words.length || words[i].split(/[\\/]/).pop() !== 'git') return null;
   i += 1;
   while (i < words.length && words[i].startsWith('-')) {
     i += GLOBAL_OPTIONS_WITH_VALUE.has(words[i]) ? 2 : 1;
@@ -87,8 +104,15 @@ function commitStagesTracked(args) {
 
 // Find every git commit in the command, including inside `sh -c` and `eval`.
 function analyze(command, flags = { commit: false, all: false, add: false }) {
+  // Fail closed: a command that names git and commit alongside syntax this parser does not model is treated as a full commit.
+  if (MENTIONS_GIT_COMMIT.test(command) && UNMODELLED_SYNTAX.test(command)) {
+    return Object.assign(flags, { commit: true, all: true, add: true });
+  }
   for (const segment of command.split(SHELL_SEPARATORS)) {
     const words = tokenize(segment);
+    if (words.some((w) => WRAPPERS.has(w)) && words.includes('git') && words.includes('commit')) {
+      return Object.assign(flags, { commit: true, all: true, add: true });
+    }
     const inv = gitInvocation(words);
     if (inv && inv.subcommand === 'commit') {
       flags.commit = true;
