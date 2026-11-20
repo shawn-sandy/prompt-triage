@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - hooks/register.ts
+      - hooks/lib/**
       - hooks/hooks.json
       - .github/workflows/bump-version.yml
 

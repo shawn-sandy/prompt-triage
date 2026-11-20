@@ -576,7 +576,13 @@ node scripts/eval-rating.mjs --runs 3
 
 | Path | What it is |
 | --- | --- |
-| `hooks/register.ts` | All of the mod's logic: the fifteen hooks and the `/refine-prompt` and `/triage-stats` commands. |
+| `hooks/register.ts` | The mod's entry point: the fifteen hooks and the `/refine-prompt` and `/triage-stats` commands, over the state they share. |
+| `hooks/lib/models.ts` | Ratings, model tiers, dialog labels, the decision types and the answer parsing (`chosen`, `pickedModel`). |
+| `hooks/lib/override.ts` | The main-loop model and effort override: `decide`, `dropModel`, `endOverride`, `retarget`. |
+| `hooks/lib/stats.ts` | The `/triage-stats` tally (`tally`, `isoDate`). |
+| `hooks/lib/decision-log.ts` | Reading and writing the decision log in the store (`decisions`, `log`, `record`, `amend`). |
+| `hooks/lib/count.ts` | The count of prompts sent and the active time shown on the status row. |
+| `hooks/lib/pickers.ts` | The band's pickers, `REVIEWER` and the reviewer prompt built from them. |
 | `hooks/register.test.ts` | Tests for the hooks, run with `claude plugin test .`. |
 | `evals/rating-prompts.json` | Labeled first prompts for scoring the rating. |
 | `scripts/eval-rating.mjs` | Scores the rating rubric, or `--baseline`, against `evals/rating-prompts.json`, once or averaged over `--runs N`. |
@@ -592,7 +598,7 @@ node scripts/eval-rating.mjs --runs 3
 Installed users only get an update when `version` in
 `.claude-plugin/plugin.json` changes. You do not edit it by hand: the
 `bump-version` workflow does it when a push to `main` changes
-`hooks/register.ts`, `hooks/hooks.json` or the workflow file itself. It raises
+`hooks/register.ts`, anything in `hooks/lib/`, `hooks/hooks.json` or the workflow file itself. It raises
 the minor number if a pushed commit subject starts with `feat:` or
 `feat(scope):`, and the patch number otherwise. It commits the new version to a
 `bump/v<version>` branch and opens a pull request for it. When that pull request
