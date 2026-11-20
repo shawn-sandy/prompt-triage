@@ -97,8 +97,8 @@ code.
 
 ## Acceptance Criteria
 
-- [x] `claude plugin test .` reports 275 passing plus the one export test (276 in all), 0 failing, and exits 0 after every extraction commit.
-- [ ] `claude plugin validate .` and `claude plugin validate . --strict` exit 0. Blocked: `validate .` exits 0, but `--strict` exited 1 on the untouched baseline (0a55926) and still does, over the warning "CLAUDE.md at the plugin root is not loaded as project context". That predates this plan.
+- [x] `claude plugin test .` reports 275 passing plus the one export test (276 in all), 0 failing, and exits 0 after every extraction commit. After merging main (#80 added 2 tests), it reports 278 pass and 0 fail.
+- [ ] `claude plugin validate .` and `claude plugin validate . --strict` exit 0. Blocked: `validate .` exits 0, but `--strict` exits 1. Two causes: the baseline (0a55926) warning "CLAUDE.md at the plugin root is not loaded as project context", which predates this plan, and 9 TS5097 warnings (in `register.ts` and three `hooks/lib/` files) that this split adds. The `.ts` import extensions are kept on purpose, so plain `node` can load the lib files for `scripts/eval-*.mjs`, and `validate` ignores the repo's `tsconfig.json`, so `allowImportingTsExtensions` cannot silence them.
 - [x] The sorted export list of `hooks/register.ts` after the last step equals the list recorded in step 2.
 - [x] No test in `hooks/register.test.ts` was edited, loosened or skipped, other than the one export test added in step 4.
 - [x] `claude -p --plugin-dir .` loads the mod and the `/refine-prompt` commands behave as in step 6.
@@ -111,8 +111,8 @@ code.
 
 From the worktree root, in order:
 
-1. `claude plugin test .` shows 276 pass (275 existing plus the export test), 0 fail, exit 0.
-2. `claude plugin validate .` exits 0. `claude plugin validate . --strict` exits 1 on the untouched baseline too, over the CLAUDE.md-at-plugin-root warning; it passes this check when that is its only warning.
+1. `claude plugin test .` shows 276 pass (275 existing plus the export test), 0 fail, exit 0; 278 once main's 2 tests from #80 are merged in.
+2. `claude plugin validate .` exits 0. `claude plugin validate . --strict` exits 1 on the untouched baseline over the CLAUDE.md-at-plugin-root warning, and now also over 9 TS5097 warnings for the `.ts` import extensions in `register.ts` and `hooks/lib/`. The extensions are a deliberate trade for plain-`node` loading; this check stays blocked.
 3. The step 2 export-list command prints the same line as the baseline.
 4. `claude -p --plugin-dir . "/refine-prompt"` prints the usage line, and the long form reaches `no_composer`.
 5. `node scripts/eval-rating.mjs` starts and prints its header (one run is enough to prove the import).
