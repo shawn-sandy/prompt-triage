@@ -15,7 +15,10 @@ import { dirname, join, resolve } from 'node:path';
 const isWindows = process.platform === 'win32';
 // NoDefaultCurrentDirectoryInExePath stops Windows from resolving a bare program
 // name (node, git, claude) from the working directory, which is the edited worktree.
-const CHILD_ENV = { ...process.env, NoDefaultCurrentDirectoryInExePath: '1' };
+// Windows resolves names in this parent process before any child starts, so the
+// guard is set here as well as in the child environment.
+if (isWindows) process.env.NoDefaultCurrentDirectoryInExePath = '1';
+const CHILD_ENV = { ...process.env };
 const CAPTURE = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: CHILD_ENV };
 
 // Run a command with no shell and return its trimmed stdout, or null on failure.
@@ -38,7 +41,9 @@ function realpath(path) {
 // Find the absolute path of claude, searched from the trusted project directory.
 // A path with cmd metacharacters is refused, so it never reaches the shell below.
 function findClaude(project) {
-  const found = capture(isWindows ? 'where' : 'which', ['claude'], project);
+  // where.exe is called by its System32 path so the lookup itself cannot be shadowed.
+  const locator = isWindows ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'where.exe') : 'which';
+  const found = capture(locator, ['claude'], project);
   const path = found ? found.split(/\r?\n/)[0].trim() : null;
   return path && !/["&|<>^%!]/.test(path) ? path : null;
 }
