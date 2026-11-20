@@ -4,21 +4,21 @@
 // `claude plugin validate .` there. A validation failure exits 2 so the
 // validator output reaches Claude. Anything else exits 0 without output.
 // Plain Node, so it runs the same under PowerShell on Windows and under POSIX shells.
-import { execFileSync } from 'node:child_process';
+//
+// Every lookup runs with the trusted project directory as its working directory,
+// never the edited file's folder, so a planted git or claude in that folder is not
+// picked up. The validator runs by absolute path in the target worktree.
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 const isWindows = process.platform === 'win32';
+const CAPTURE = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
 
-// Run a command and return its trimmed stdout, or null when it fails.
+// Run a command with no shell and return its trimmed stdout, or null on failure.
 function capture(cmd, args, cwd) {
   try {
-    return execFileSync(cmd, args, {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      shell: isWindows,
-    }).trim();
+    return execFileSync(cmd, args, { ...CAPTURE, cwd }).trim();
   } catch {
     return null;
   }
@@ -32,8 +32,23 @@ function realpath(path) {
   }
 }
 
-function gitValue(args, cwd) {
-  return capture('git', args, cwd);
+// Find the absolute path of claude, searched from the trusted project directory.
+// A path with cmd metacharacters is refused, so it never reaches the shell below.
+function findClaude(project) {
+  const found = capture(isWindows ? 'where' : 'which', ['claude'], project);
+  const path = found ? found.split(/\r?\n/)[0].trim() : null;
+  return path && !/["&|<>^%!]/.test(path) ? path : null;
+}
+
+// Run `claude plugin validate .` in `top` by absolute path. Windows .cmd shims
+// need the shell, so the path is quoted; no bare name is resolved from `top`.
+function validate(claudePath, top) {
+  const options = { cwd: top, ...CAPTURE, stdio: ['ignore', 'pipe', 'pipe'] };
+  if (isWindows && /\.(cmd|bat)$/i.test(claudePath)) {
+    execSync(`"${claudePath}" plugin validate .`, options);
+  } else {
+    execFileSync(claudePath, ['plugin', 'validate', '.'], options);
+  }
 }
 
 async function readStdin() {
@@ -42,7 +57,7 @@ async function readStdin() {
   return text;
 }
 
-function main(input) {
+function main(input, project) {
   let payload;
   try {
     payload = JSON.parse(input);
@@ -55,28 +70,20 @@ function main(input) {
   const fileAbs = realpath(file);
   if (!fileAbs) return 0;
 
-  // Only validate when claude is on PATH. Without it there is nothing to run.
-  if (capture(isWindows ? 'where' : 'which', ['claude'], undefined) === null) return 0;
+  const claudePath = findClaude(project);
+  if (!claudePath) return 0;
 
-  const project = realpath(process.env.CLAUDE_PROJECT_DIR || '.');
-  if (!project) return 0;
-
-  const top = gitValue(['rev-parse', '--show-toplevel'], dirname(fileAbs));
+  const top = capture('git', ['-C', dirname(fileAbs), 'rev-parse', '--show-toplevel'], project);
   if (!top) return 0;
 
-  const common = gitValue(['rev-parse', '--path-format=absolute', '--git-common-dir'], top);
-  const projectCommon = gitValue(['rev-parse', '--path-format=absolute', '--git-common-dir'], project);
+  const common = capture('git', ['-C', top, 'rev-parse', '--path-format=absolute', '--git-common-dir'], project);
+  const projectCommon = capture('git', ['-C', project, 'rev-parse', '--path-format=absolute', '--git-common-dir'], project);
   if (!common || common !== projectCommon) return 0;
 
   if (!existsSync(join(top, '.claude-plugin', 'plugin.json'))) return 0;
 
   try {
-    execFileSync('claude', ['plugin', 'validate', '.'], {
-      cwd: top,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: isWindows,
-    });
+    validate(claudePath, top);
   } catch (error) {
     process.stderr.write(`${error.stdout ?? ''}${error.stderr ?? ''}`.trim() || String(error.message));
     process.stderr.write('\n');
@@ -85,5 +92,5 @@ function main(input) {
   return 0;
 }
 
-const code = main(await readStdin());
-process.exitCode = code;
+const project = realpath(process.env.CLAUDE_PROJECT_DIR || '.');
+process.exitCode = project ? main(await readStdin(), project) : 0;
